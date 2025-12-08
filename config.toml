@@ -1,0 +1,33 @@
+# Stimulation Server Configuration
+
+[hardware]
+# Wireless Dongle Port
+stimulator_port = "COM3"
+
+# Link to Behavior PC (USB-TTL Adapter)
+trigger_port = "COM5"
+baud_rate = 9600
+
+[stimulation.brain_standard]
+freq = 200          # Hz
+amp = 0.05          # mA
+pw = 0.2            # ms
+duration = 0.5      # seconds
+channel = [1]       # Active electrode(s)
+inter_phase = 50e-6 # seconds
+
+[stimulation.brain_strong]
+freq = 200
+amp = 0.10
+pw = 0.2
+duration = 0.5
+channel = [1]
+inter_phase = 50e-6
+
+[stimulation.muscle_test]
+freq = 30
+amp = 2.0
+pw = 0.4
+duration = 1.0
+channel = [2, 4]
+inter_phase = 50e-6
