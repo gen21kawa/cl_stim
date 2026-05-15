@@ -83,7 +83,7 @@ class MatlabStimulator:
         try:
             print("[MatlabStimulator] Connecting to dongle...")
             # Create object with debug level 1
-            self.eng.eval("stim_params = struct('dbg_lvl', 1);", nargout=0)
+            self.eng.eval("stim_params = struct('dbg_lvl', 1, 'serial_string', sp.serial_string);", nargout=0)
             self.eng.eval("ws = wireless_stim(stim_params);", nargout=0)
             
             # Initialize & Version Check
