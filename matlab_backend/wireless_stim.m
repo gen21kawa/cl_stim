@@ -38,7 +38,7 @@ classdef wireless_stim < handle
             if nargin < 1
                 error('wireless_stim constructor: no parameter struct');
             end
-            
+
             if isfield(params, 'dbg_lvl')
                 obj.dbg_lvl = params.dbg_lvl;
             else
@@ -48,14 +48,14 @@ classdef wireless_stim < handle
             if obj.dbg_lvl >= 2
                 disp('wireless_stim:constructor');
             end
-            
+
             if isfield(params, 'comm_timeout_ms')
                 obj.comm_timeout_ms = params.comm_timeout_ms;
             else
                 warning('wireless_stim constructor: comm_timeout_ms not specified, default to 10s');
                 obj.comm_timeout_ms = 10000;
             end
-            
+
             if isfield(params, 'blocking')
                 obj.blocking = params.blocking;
             else
@@ -69,7 +69,13 @@ classdef wireless_stim < handle
                 warning('wireless_stim constructor: zb_ch_page not specified, default to 2');
                 obj.zb_ch_page = 2;
             end
-            
+
+            if isfield(params, 'trim_calibrate_if_missing')
+                obj.trim_calibrate_if_missing = params.trim_calibrate_if_missing;
+            else
+                obj.trim_calibrate_if_missing = true;
+            end
+
             if isfield(params, 'serial_string')
                 obj.serial = serial(params.serial_string);
             else
@@ -276,13 +282,17 @@ classdef wireless_stim < handle
             catch ME
                 warning('ME id=\"%s\"\nME msg=\"%s\"\n', ME.identifier, ME.message);
 
-                prompt = 'Trim calibration data not found. Would you like to run trim_calibrate? y/n [y]';
-                answer = input(prompt, 's');
-                if isempty(answer)
-                    answer = 'Y';
-                end
-                if upper(answer) == 'Y'
-                    obj.trim_calibrate([1:obj.num_channels]);
+                if obj.trim_calibrate_if_missing
+                    prompt = 'Trim calibration data not found. Would you like to run trim_calibrate? y/n [y]';
+                    answer = input(prompt, 's');
+                    if isempty(answer)
+                        answer = 'Y';
+                    end
+                    if upper(answer) == 'Y'
+                        obj.trim_calibrate([1:obj.num_channels]);
+                    end
+                else
+                    warning('Trim calibration data not found. Using default trim calibration values.');
                 end
             end
             
@@ -988,6 +998,7 @@ classdef wireless_stim < handle
         comm_timeout_ms;
         blocking;
         zb_ch_page;
+        trim_calibrate_if_missing;
     end
     methods %(Access = private)
         function addr_out = reg_ch_addr(obj, addr, channel, broadcast)

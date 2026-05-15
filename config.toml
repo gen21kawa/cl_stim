@@ -3,6 +3,8 @@
 [hardware]
 # Wireless Dongle Port
 stimulator_port = "COM3"
+# Optional: folder containing trim_cal_data.mat, matching BMI's path_cal_ws.
+# calibration_dir = 'C:\Program Files (x86)\Ripple'
 
 # Link to Behavior PC (USB-TTL Adapter)
 trigger_port = "COM5"

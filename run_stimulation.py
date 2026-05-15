@@ -28,6 +28,7 @@ from matlab_stimulator import MatlabStimulator
 STIM_PORT = CONFIG['hardware']['stimulator_port']
 TRIGGER_PORT = CONFIG['hardware']['trigger_port']
 BAUD_RATE = CONFIG['hardware']['baud_rate']
+CALIBRATION_DIR = CONFIG['hardware'].get('calibration_dir')
 
 # Load Stimulation Protocol (e.g., 'brain_standard')
 # You can change this key to select different protocols from config.toml
@@ -45,7 +46,7 @@ def main():
         print(f"!! ERROR: MATLAB backend not found at {matlab_path}")
         return
 
-    stim = MatlabStimulator(matlab_path, mock_mode=USE_MOCK)
+    stim = MatlabStimulator(matlab_path, mock_mode=USE_MOCK, calibration_dir=CALIBRATION_DIR)
 
     # 2. Configure Stimulator
     print(">> Configuring Stimulator...")

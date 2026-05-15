@@ -9,7 +9,7 @@ class MatlabStimulator:
     and driving the wireless stimulator hardware.
     """
 
-    def __init__(self, matlab_backend_path, mock_mode=False):
+    def __init__(self, matlab_backend_path, mock_mode=False, calibration_dir=None):
         """
         Initialize the MATLAB Engine and add the backend files to the path.
         
@@ -18,6 +18,7 @@ class MatlabStimulator:
             mock_mode (bool): If True, bypasses actual hardware calls for testing.
         """
         self.mock = mock_mode
+        self.calibration_dir = calibration_dir
         self.ws_initialized = False
         
         print("[MatlabStimulator] Starting MATLAB Engine...")
@@ -54,8 +55,7 @@ class MatlabStimulator:
         self.eng.eval("sp.muscles = {'Channel1'};", nargout=0)
         
         # Anode Map: {[1]; [1]} -> Channel 1, 100% current
-        # MATLAB syntax: {{[1]; [1]}}
-        self.eng.eval("sp.anode_map = {{[1]; [1]}};", nargout=0)
+        self.eng.eval("sp.anode_map = {[1]; [1]};", nargout=0)
         
         # Cathode Map: Empty for monopolar
         self.eng.eval("sp.cathode_map = {{}};", nargout=0)
@@ -83,12 +83,18 @@ class MatlabStimulator:
         try:
             print("[MatlabStimulator] Connecting to dongle...")
             # Create object with debug level 1
-            self.eng.eval("stim_params = struct('dbg_lvl', 1, 'serial_string', sp.serial_string);", nargout=0)
+            self.eng.eval("stim_params = struct('dbg_lvl', 1, 'comm_timeout_ms', -1, 'blocking', true, 'zb_ch_page', 17, 'serial_string', sp.serial_string, 'trim_calibrate_if_missing', false);", nargout=0)
             self.eng.eval("ws = wireless_stim(stim_params);", nargout=0)
             
             # Initialize & Version Check
-            self.eng.eval("ws.init();", nargout=0)
-            # self.eng.eval("ws.version();", nargout=0) # Optional
+            self.eng.eval("previous_dir = pwd;", nargout=0)
+            try:
+                if self.calibration_dir:
+                    self.eng.cd(self.calibration_dir, nargout=0)
+                self.eng.eval("ws.init();", nargout=0)
+            finally:
+                self.eng.eval("cd(previous_dir);", nargout=0)
+            self.eng.eval("ws.version();", nargout=0)
             
             # Send static configuration (Frequency, Polarity)
             self.eng.eval("setup_wireless_stim_fes(ws, sp);", nargout=0)
