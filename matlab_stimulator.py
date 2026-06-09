@@ -1,6 +1,4 @@
-import matlab.engine
 import os
-import sys
 
 class MatlabStimulator:
     """
@@ -20,13 +18,20 @@ class MatlabStimulator:
         self.mock = mock_mode
         self.calibration_dir = calibration_dir
         self.ws_initialized = False
-        
-        print("[MatlabStimulator] Starting MATLAB Engine...")
-        self.eng = matlab.engine.start_matlab()
+        self.eng = None
         
         # Verify path exists
         if not os.path.exists(matlab_backend_path):
             raise FileNotFoundError(f"MATLAB backend path not found: {matlab_backend_path}")
+
+        if self.mock:
+            print("[MatlabStimulator] MOCK: MATLAB Engine not started.")
+            return
+
+        import matlab.engine
+
+        print("[MatlabStimulator] Starting MATLAB Engine...")
+        self.eng = matlab.engine.start_matlab()
             
         # Add the backend folder to MATLAB's search path
         print(f"[MatlabStimulator] Adding path: {matlab_backend_path}")
@@ -38,6 +43,10 @@ class MatlabStimulator:
         This replaces the old 'bmi_params_defaults.m'.
         """
         print(f"[MatlabStimulator] Configuring: Port={port}, Freq={freq}Hz, Mode={return_mode}")
+
+        if self.mock:
+            print(f"[MatlabStimulator] MOCK CONFIG: PW={pw}ms, Amp={amp}mA")
+            return
         
         # 1. Create the struct
         self.eng.eval("sp = struct();", nargout=0)
@@ -151,6 +160,7 @@ class MatlabStimulator:
                 self.eng.eval("delete(ws);", nargout=0)
             except:
                 pass
-        
-        self.eng.quit()
+
+        if self.eng is not None:
+            self.eng.quit()
         print("[MatlabStimulator] Engine Closed.")
