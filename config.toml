@@ -54,7 +54,7 @@ inter_phase = 50e-6
 
 [experiments.m1_mapping_low]
 profile = "m1_mapping_low"
-real_enabled = false
+real_enabled = true
 description = "Stationary/onset/delayed M1 mapping, low-amplitude block."
 
 [experiments.m1_mapping_low.commands.1]

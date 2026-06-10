@@ -54,7 +54,7 @@ def print_help():
     print("Commands:")
     print("  on | 1             Start stimulation")
     print("  off | 0            Stop stimulation")
-    print("  pulse [seconds]    Stimulate briefly, then stop")
+    print("  pulse | 2 [seconds] Stimulate briefly, then stop")
     print("  status             Show current settings")
     print("  help               Show this command list")
     print("  quit | exit        Stop stimulation and exit")
@@ -187,7 +187,7 @@ def main():
                     active = False
                     print(">> Stimulation OFF")
 
-                elif action == "pulse":
+                elif action in ("pulse", "2"):
                     duration = parse_pulse_duration(parts, pulse_duration)
                     if pulse_mode == "single_pulse":
                         print(">> Single pulse")
