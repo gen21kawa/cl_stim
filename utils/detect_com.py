@@ -3,7 +3,7 @@
 import sys
 import glob
 import serial
-from ..main_logger import get_logger
+from main_logger import get_logger
 
 logger = get_logger()
 

@@ -54,7 +54,9 @@ def main():
         port=STIM_PORT,
         freq=STIM_PROFILE['freq'],
         pw=STIM_PROFILE['pw'],
-        amp=STIM_PROFILE['amp']
+        amp=STIM_PROFILE['amp'],
+        channels=STIM_PROFILE.get('channel'),
+        inter_phase=STIM_PROFILE.get('inter_phase', 50e-6),
     )
     
     # 3. Connect to Stimulator Hardware
@@ -62,6 +64,7 @@ def main():
         stim.connect()
     except Exception as e:
         print(f"!! FATAL: Could not connect to stimulator: {e}")
+        stim.close()
         return
 
     # 4. Open Serial Link to Behavior PC

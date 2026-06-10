@@ -128,6 +128,8 @@ def main():
             freq=stim_profile["freq"],
             pw=stim_profile["pw"],
             amp=stim_profile["amp"],
+            channels=stim_profile.get("channel"),
+            inter_phase=stim_profile.get("inter_phase", 50e-6),
         )
 
         print(">> Connecting...")

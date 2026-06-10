@@ -698,7 +698,7 @@ classdef wireless_stim < handle
                 error('commands struct array must have only 1 element');
             end
 
-            command = commands{1};
+            command = commands(1);
             fields = fieldnames(command);
             num_fields = length(fields);
 

@@ -42,7 +42,9 @@ def main():
         port=hw_conf['stimulator_port'],
         freq=stim_conf['freq'],
         pw=stim_conf['pw'],
-        amp=stim_conf['amp']
+        amp=stim_conf['amp'],
+        channels=stim_conf.get('channel'),
+        inter_phase=stim_conf.get('inter_phase', 50e-6),
     )
 
     # 4. Connect

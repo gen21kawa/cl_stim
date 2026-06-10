@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# MATLAB generated files
+*.asv
+*.m~
+*.mat
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

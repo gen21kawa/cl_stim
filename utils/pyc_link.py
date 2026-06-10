@@ -2,8 +2,8 @@
 # modified from real-time-neuropixels (implemented by Mostafa Safaie)
 import serial
 
-from detect_com import serial_ports
-from ..main_logger import get_logger
+from utils.detect_com import serial_ports
+from main_logger import get_logger
 
 logger = get_logger()
 

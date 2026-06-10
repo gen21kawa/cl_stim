@@ -24,9 +24,10 @@ pw                      = bmi_fes_params.PW_max*1000;
 % pass the values for all sixteen channels
 chs_cmd         = 1:ws.num_channels;
 
-% set train duration, stim freq and train delay 
+% set train frequency, train delay, and inter-phase interval
 ws.set_Freq( bmi_fes_params.freq , chs_cmd );
-ws.set_TD( 50,chs_cmd ); % minimum allowed is 50 us -- see below for additional notes on this KB 07/14/2017
+ws.set_TD( 50, chs_cmd ); % minimum allowed is 50 us -- see below for additional notes on this KB 07/14/2017
+ws.set_IPIDur( bmi_fes_params.inter_ph_int * 1e6, chs_cmd );
 
 % Set up the parameters that will be constant during FES
 switch bmi_fes_params.mode
