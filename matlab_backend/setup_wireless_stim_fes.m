@@ -15,6 +15,20 @@ channel_list_len        = length(channel_list);
 % the stimulator channels need to be ordered
 [channel_list, indx_ch] = sort(channel_list);
 
+if isfield(bmi_fes_params, 'pulse_mode')
+    pulse_mode = bmi_fes_params.pulse_mode;
+else
+    pulse_mode = 'train';
+end
+
+if strcmp(pulse_mode, 'single_pulse')
+    if isfield(bmi_fes_params, 'single_pulse_train_ms')
+        single_pulse_train_ms = bmi_fes_params.single_pulse_train_ms;
+    else
+        single_pulse_train_ms = 1;
+    end
+end
+
 % stim amplitude in mA
 amp                     = bmi_fes_params.amplitude_max*1000;
 pw                      = bmi_fes_params.PW_max*1000;
@@ -28,6 +42,9 @@ chs_cmd         = 1:ws.num_channels;
 ws.set_Freq( bmi_fes_params.freq , chs_cmd );
 ws.set_TD( 50, chs_cmd ); % minimum allowed is 50 us -- see below for additional notes on this KB 07/14/2017
 ws.set_IPIDur( bmi_fes_params.inter_ph_int * 1e6, chs_cmd );
+if strcmp(pulse_mode, 'single_pulse')
+    ws.set_TL( single_pulse_train_ms, chs_cmd );
+end
 
 % Set up the parameters that will be constant during FES
 switch bmi_fes_params.mode
@@ -73,8 +90,11 @@ switch bmi_fes_params.mode
 %                     ws.set_TD( td, channel_list(ch) );
 %                 end
 
-                % set to run continuous
-                ws.set_Run( ws.run_cont, channel_list );
+                if strcmp(pulse_mode, 'single_pulse')
+                    ws.set_Run( ws.run_once, channel_list );
+                else
+                    ws.set_Run( ws.run_cont, channel_list );
+                end
 
             case 'bipolar'
 
@@ -118,9 +138,13 @@ switch bmi_fes_params.mode
                 % Set polarity to anodic first
                 ws.set_PL( 1, cathode_list );
                 
-                % set to run continuous
-                ws.set_Run( ws.run_cont, anode_list );
-                ws.set_Run( ws.run_cont, cathode_list );
+                if strcmp(pulse_mode, 'single_pulse')
+                    ws.set_Run( ws.run_once, anode_list );
+                    ws.set_Run( ws.run_once, cathode_list );
+                else
+                    ws.set_Run( ws.run_cont, anode_list );
+                    ws.set_Run( ws.run_cont, cathode_list );
+                end
         end
         
     % For amplitude-modulated FES
@@ -150,8 +174,11 @@ switch bmi_fes_params.mode
                 ws.set_PL( 1, chs_cmd )
 
 
-                % set to run continuous
-                ws.set_Run( ws.run_cont, channel_list );
+                if strcmp(pulse_mode, 'single_pulse')
+                    ws.set_Run( ws.run_once, channel_list );
+                else
+                    ws.set_Run( ws.run_cont, channel_list );
+                end
 
             case 'bipolar'
 
@@ -178,9 +205,12 @@ switch bmi_fes_params.mode
                 % Set polarity to anodic first
                 ws.set_PL( 1, cathode_list );
                 
-                % set to run continuous
-                ws.set_Run( ws.run_cont, anode_list );
-                ws.set_Run( ws.run_cont, cathode_list );
+                if strcmp(pulse_mode, 'single_pulse')
+                    ws.set_Run( ws.run_once, anode_list );
+                    ws.set_Run( ws.run_once, cathode_list );
+                else
+                    ws.set_Run( ws.run_cont, anode_list );
+                    ws.set_Run( ws.run_cont, cathode_list );
+                end
         end
 end
-

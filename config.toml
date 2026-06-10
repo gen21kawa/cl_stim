@@ -1,18 +1,23 @@
 # Stimulation Server Configuration
 
+[run]
+mock_mode = true
+active_experiment = "m1_mapping_low"
+log_triggers = true
+
 [hardware]
 # Wireless Dongle Port
-stimulator_port = "COM3"
+stimulator_port = "COM9"
 # Optional: folder containing trim_cal_data.mat, matching BMI's path_cal_ws.
 # calibration_dir = 'C:\Program Files (x86)\Ripple'
 
 # Link to Behavior PC (USB-TTL Adapter)
-trigger_port = "COM5"
+trigger_port = "COM3"
 baud_rate = 9600
 
 [stimulation.brain_standard]
-freq = 200          # Hz
-amp = 0.05          # mA
+freq = 130          # Hz
+amp = 0.02          # mA
 pw = 0.2            # ms
 duration = 0.5      # seconds
 channel = [1]       # Active electrode(s)
@@ -33,3 +38,37 @@ pw = 0.4
 duration = 1.0
 channel = [2, 4]
 inter_phase = 50e-6
+
+# First-pass M1 behavioral mapping block.
+# Replace channel = [1, 2] with the real [left_m1, right_m1] stim channels
+# before setting the experiment's real_enabled flag to true.
+[stimulation.m1_mapping_low]
+freq = 50
+amp = 0.05
+pw = 0.2
+duration = 0.2        # seconds, used when pulse_mode = "train"
+pulse_mode = "train"  # "train" or "single_pulse"
+# single_pulse_train_ms = 1.0 # optional; auto-computed if omitted
+channel = [1, 2]
+inter_phase = 50e-6
+
+[experiments.m1_mapping_low]
+profile = "m1_mapping_low"
+real_enabled = false
+description = "Stationary/onset/delayed M1 mapping, low-amplitude block."
+
+[experiments.m1_mapping_low.commands.1]
+name = "sham"
+pw_fraction = [0, 0]
+
+[experiments.m1_mapping_low.commands.2]
+name = "left_m1"
+pw_fraction = [1, 0]
+
+[experiments.m1_mapping_low.commands.3]
+name = "right_m1"
+pw_fraction = [0, 1]
+
+[experiments.m1_mapping_low.commands.4]
+name = "bilateral"
+pw_fraction = [1, 1]

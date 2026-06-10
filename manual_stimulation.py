@@ -2,8 +2,8 @@
 Interactive manual stimulation test script.
 
 This script drives the stimulator from typed user commands instead of
-pyControl serial triggers. It defaults to mock mode; pass --real to use
-hardware.
+pyControl serial triggers. It uses [run].mock_mode from config.toml by
+default; pass --real or --mock to override it.
 """
 
 import argparse
@@ -37,9 +37,17 @@ def parse_args():
     parser.add_argument(
         "--real",
         action="store_true",
-        help="Use real stimulator hardware. Defaults to mock mode.",
+        help="Use real stimulator hardware, overriding [run].mock_mode.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use mock mode, overriding [run].mock_mode.",
+    )
+    args = parser.parse_args()
+    if args.real and args.mock:
+        parser.error("--real and --mock cannot be used together.")
+    return args
 
 
 def print_help():
@@ -52,15 +60,23 @@ def print_help():
     print("  quit | exit        Stop stimulation and exit")
 
 
+def profile_pulse_mode(stim_profile):
+    pulse_mode = str(stim_profile.get("pulse_mode", "train")).lower()
+    if pulse_mode == "single":
+        pulse_mode = "single_pulse"
+    return pulse_mode
+
+
 def print_status(profile_name, stim_profile, stim_port, duration, mock_mode, active):
     mode = "MOCK" if mock_mode else "REAL"
     state = "ON" if active else "OFF"
+    pulse_mode = profile_pulse_mode(stim_profile)
     print(f">> Mode: {mode} | State: {state}")
     print(f">> Profile: {profile_name}")
     print(
         f">> Port: {stim_port} | Freq: {stim_profile['freq']}Hz | "
         f"PW: {stim_profile['pw']}ms | Amp: {stim_profile['amp']}mA | "
-        f"Pulse duration: {duration}s"
+        f"Pulse mode: {pulse_mode} | Pulse duration: {duration}s"
     )
 
 
@@ -88,10 +104,14 @@ def main():
         return 2
 
     stim_profile = stim_profiles[args.profile]
+    pulse_mode = profile_pulse_mode(stim_profile)
+    if pulse_mode not in ("train", "single_pulse"):
+        print("!! pulse_mode must be 'train' or 'single_pulse'.")
+        return 2
     pulse_duration = (
         args.duration if args.duration is not None else stim_profile.get("duration", 0.5)
     )
-    if pulse_duration <= 0:
+    if pulse_mode != "single_pulse" and pulse_duration <= 0:
         print("!! Pulse duration must be greater than 0 seconds.")
         return 2
 
@@ -100,7 +120,12 @@ def main():
         print(f"!! ERROR: MATLAB backend not found at {matlab_path}")
         return 1
 
-    mock_mode = not args.real
+    mock_mode = bool(CONFIG.get("run", {}).get("mock_mode", True))
+    if args.real:
+        mock_mode = False
+    elif args.mock:
+        mock_mode = True
+
     stim_port = hw_conf["stimulator_port"]
     calibration_dir = hw_conf.get("calibration_dir")
 
@@ -115,6 +140,8 @@ def main():
     )
     if mock_mode:
         print(">> Mock mode is active. Pass --real to use stimulator hardware.")
+    else:
+        print(">> Real mode is active. Pass --mock to force a no-hardware run.")
 
     stim = MatlabStimulator(
         matlab_path, mock_mode=mock_mode, calibration_dir=calibration_dir
@@ -130,6 +157,8 @@ def main():
             amp=stim_profile["amp"],
             channels=stim_profile.get("channel"),
             inter_phase=stim_profile.get("inter_phase", 50e-6),
+            pulse_mode=pulse_mode,
+            single_pulse_train_ms=stim_profile.get("single_pulse_train_ms"),
         )
 
         print(">> Connecting...")
@@ -147,8 +176,11 @@ def main():
             try:
                 if action in ("on", "1"):
                     stim.stimulate(pw=stim_profile["pw"], amp=stim_profile["amp"])
-                    active = True
-                    print(">> Stimulation ON")
+                    active = pulse_mode != "single_pulse"
+                    if pulse_mode == "single_pulse":
+                        print(">> Single pulse sent")
+                    else:
+                        print(">> Stimulation ON")
 
                 elif action in ("off", "0"):
                     stim.stop()
@@ -157,6 +189,13 @@ def main():
 
                 elif action == "pulse":
                     duration = parse_pulse_duration(parts, pulse_duration)
+                    if pulse_mode == "single_pulse":
+                        print(">> Single pulse")
+                        stim.stimulate(pw=stim_profile["pw"], amp=stim_profile["amp"])
+                        active = False
+                        print(">> Pulse complete")
+                        continue
+
                     print(f">> Pulse ON for {duration}s")
                     stim.stimulate(pw=stim_profile["pw"], amp=stim_profile["amp"])
                     active = True
