@@ -17,6 +17,7 @@ sys.path.append(root_dir)
 
 from matlab_stimulator import MatlabStimulator
 from utils.loader import CONFIG
+from utils.serial_port_resolver import resolve_serial_port
 
 
 def parse_args():
@@ -126,7 +127,18 @@ def main():
     elif args.mock:
         mock_mode = True
 
-    stim_port = hw_conf["stimulator_port"]
+    try:
+        stim_port, stim_port_candidates, detected_ports = resolve_serial_port(
+            hw_conf,
+            "stimulator_ports",
+            "stimulator_port",
+            label="stimulator port",
+            require_available=not mock_mode,
+        )
+    except RuntimeError as exc:
+        print(f"!! {exc}")
+        return 2
+
     calibration_dir = hw_conf.get("calibration_dir")
 
     print("=== Manual Stimulation Test ===")
@@ -142,6 +154,10 @@ def main():
         print(">> Mock mode is active. Pass --real to use stimulator hardware.")
     else:
         print(">> Real mode is active. Pass --mock to force a no-hardware run.")
+    if len(stim_port_candidates) > 1:
+        print(f">> Stimulator port candidates: {stim_port_candidates}")
+        if detected_ports is not None:
+            print(f">> Detected serial ports: {detected_ports}")
 
     stim = MatlabStimulator(
         matlab_path, mock_mode=mock_mode, calibration_dir=calibration_dir

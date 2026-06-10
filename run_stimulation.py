@@ -19,13 +19,14 @@ sys.path.append(root_dir)
 # IMPORTS
 # -------------------------------------------------------------------------
 from utils.loader import CONFIG
+from utils.serial_port_resolver import resolve_serial_port
 from matlab_stimulator import MatlabStimulator
 
 # -------------------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------------------
 # Load Hardware Config
-STIM_PORT = CONFIG['hardware']['stimulator_port']
+HW_CONF = CONFIG['hardware']
 TRIGGER_PORT = CONFIG['hardware']['trigger_port']
 BAUD_RATE = CONFIG['hardware']['baud_rate']
 CALIBRATION_DIR = CONFIG['hardware'].get('calibration_dir')
@@ -176,6 +177,18 @@ def main():
     elif args.mock:
         mock_mode = True
 
+    try:
+        stim_port, stim_port_candidates, detected_ports = resolve_serial_port(
+            HW_CONF,
+            "stimulator_ports",
+            "stimulator_port",
+            label="stimulator port",
+            require_available=not mock_mode,
+        )
+    except RuntimeError as exc:
+        print(f"!! FATAL: {exc}")
+        return 2
+
     if not mock_mode and not experiment.get("real_enabled", False):
         print(
             f"!! FATAL: Experiment '{experiment_name}' is not enabled for real hardware."
@@ -220,6 +233,11 @@ def main():
             f"{stim_profile.get('single_pulse_train_ms', 'auto')}ms"
         )
     print(f">> Mode: {'MOCK' if mock_mode else 'REAL'}")
+    print(f">> Stimulator port: {stim_port}")
+    if len(stim_port_candidates) > 1:
+        print(f">> Stimulator port candidates: {stim_port_candidates}")
+        if detected_ports is not None:
+            print(f">> Detected serial ports: {detected_ports}")
     print(">> Command map:")
     for code in sorted(commands):
         command = commands[code]
@@ -236,7 +254,7 @@ def main():
     # 2. Configure Stimulator
     print(">> Configuring Stimulator...")
     stim.configure(
-        port=STIM_PORT,
+        port=stim_port,
         freq=stim_profile['freq'],
         pw=stim_profile['pw'],
         amp=stim_profile['amp'],

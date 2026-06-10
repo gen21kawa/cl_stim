@@ -6,7 +6,10 @@ active_experiment = "m1_mapping_low"
 log_triggers = true
 
 [hardware]
-# Wireless Dongle Port
+# Wireless Dongle Port. Real-mode scripts try these in order and use the
+# one currently detected by pyserial.
+stimulator_ports = ["COM8", "COM9"]
+# Fallback for older scripts/tests that expect one configured port.
 stimulator_port = "COM9"
 # Optional: folder containing trim_cal_data.mat, matching BMI's path_cal_ws.
 # calibration_dir = 'C:\Program Files (x86)\Ripple'
@@ -22,6 +25,16 @@ pw = 0.2            # ms
 duration = 0.5      # seconds
 channel = [1]       # Active electrode(s)
 inter_phase = 50e-6 # seconds
+
+[stimulation.brain_standard_single_pulse]
+freq = 130
+amp = 0.02
+pw = 0.2
+duration = 0.5
+pulse_mode = "single_pulse"
+single_pulse_train_ms = 1.0
+channel = [1]
+inter_phase = 50e-6
 
 [stimulation.brain_strong]
 freq = 200
@@ -72,3 +85,21 @@ pw_fraction = [0, 1]
 [experiments.m1_mapping_low.commands.4]
 name = "bilateral"
 pw_fraction = [1, 1]
+
+[experiments.brain_standard]
+profile = "brain_standard"
+real_enabled = false
+description = "Standard single-channel brain stimulation test."
+
+[experiments.brain_standard.commands.1]
+name = "stim"
+pw_fraction = [1]
+
+[experiments.brain_standard_single_pulse]
+profile = "brain_standard_single_pulse"
+real_enabled = false
+description = "Standard single-channel brain stimulation, one run-once pulse."
+
+[experiments.brain_standard_single_pulse.commands.1]
+name = "stim"
+pw_fraction = [1]
