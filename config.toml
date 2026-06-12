@@ -5,6 +5,39 @@ mock_mode = true
 active_experiment = "m1_mapping_low"
 log_triggers = true
 
+[logging]
+data_root = "D:\\data\\raw"
+stim_events_enabled = true
+stim_event_dir = "logs/stim_events"
+
+[channel_map."1"]
+label = "left_m1_placeholder"
+physical_contact = ""
+target = "M1"
+hemisphere = "left"
+notes = "Replace after checking electrode/stimulator documentation."
+
+[channel_map."2"]
+label = "right_m1_placeholder"
+physical_contact = ""
+target = "M1"
+hemisphere = "right"
+notes = "Replace after checking electrode/stimulator documentation."
+
+[pycontrol_events]
+# Manual stimulation can send these markers to a pyControl UARTlink.
+# Keep disabled until the pyControl task starts hw.bci_link and handles cursor_update.
+enabled = false
+port = "COM3"
+baud_rate = 9600
+
+[pycontrol_events.codes]
+session_start = 110
+session_end = 111
+stim_on = 101
+stim_off = 102
+stim_pulse = 103
+
 [hardware]
 # Wireless Dongle Port. Real-mode scripts try these in order and use the
 # one currently detected by pyserial.
