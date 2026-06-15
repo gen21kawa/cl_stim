@@ -10,6 +10,11 @@ data_root = "D:\\data\\raw"
 stim_events_enabled = true
 stim_event_dir = "logs/stim_events"
 
+# TODO (channel mapping): these entries are PLACEHOLDERS. Map each stimulator
+# channel number to its physical electrode contact using the electrode/
+# stimulator documentation, then fill `physical_contact` and fix `label`.
+# Until then, run_stimulation.py / manual_stimulation.py log unmapped channels
+# as "unknown" and print a warning (they do not stop).
 [channel_map."1"]
 label = "left_m1_placeholder"
 physical_contact = ""
@@ -23,6 +28,13 @@ physical_contact = ""
 target = "M1"
 hemisphere = "right"
 notes = "Replace after checking electrode/stimulator documentation."
+
+[channel_map."3"]
+label = "m2_placeholder"
+physical_contact = ""
+target = "M2"
+hemisphere = "unknown"
+notes = "Replace channel number/label after checking M2 electrode and stimulator documentation."
 
 [pycontrol_events]
 # Manual stimulation can send these markers to a pyControl UARTlink.
@@ -98,6 +110,18 @@ pulse_mode = "train"  # "train" or "single_pulse"
 channel = [1, 2]
 inter_phase = 50e-6
 
+# First-pass M2 timing perturbation profile.
+# Replace channel = [3] with the real M2 stimulator channel before enabling
+# real hardware for [experiments.m2_timing].
+[stimulation.m2_timing]
+freq = 50
+amp = 0.05
+pw = 0.2
+duration = 0.2        # seconds, used when pulse_mode = "train"
+pulse_mode = "train"
+channel = [3]
+inter_phase = 50e-6
+
 [experiments.m1_mapping_low]
 profile = "m1_mapping_low"
 real_enabled = true
@@ -118,6 +142,19 @@ pw_fraction = [0, 1]
 [experiments.m1_mapping_low.commands.4]
 name = "bilateral"
 pw_fraction = [1, 1]
+
+[experiments.m2_timing]
+profile = "m2_timing"
+real_enabled = false
+description = "Task 6 M2 timing perturbation, sham vs M2 stimulation."
+
+[experiments.m2_timing.commands.1]
+name = "sham"
+pw_fraction = [0]
+
+[experiments.m2_timing.commands.2]
+name = "m2_stim"
+pw_fraction = [1]
 
 [experiments.brain_standard]
 profile = "brain_standard"

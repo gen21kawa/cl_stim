@@ -33,11 +33,11 @@ from matlab_stimulator import MatlabStimulator
 from utils.loader import CONFIG
 from utils.pycontrol_event_link import PyControlEventLink
 from utils.serial_port_resolver import resolve_serial_port
-from utils.stim_event_log import (
-    StimEventLogger,
-    resolve_channel_map,
-    resolve_output_dir,
-    resolve_session_dir,
+from utils.stim_session import (
+    build_event_fields,
+    make_event_logger,
+    normalize_pulse_mode,
+    resolve_channel_metadata,
 )
 
 
@@ -149,11 +149,8 @@ def print_help():
 
 
 def profile_pulse_mode(stim_profile):
-    """Normalize the profile's pulse mode to the names used by MatlabStimulator."""
-    pulse_mode = str(stim_profile.get("pulse_mode", "train")).lower()
-    if pulse_mode == "single":
-        pulse_mode = "single_pulse"
-    return pulse_mode
+    """Normalize the profile's pulse mode (lenient; no validation)."""
+    return normalize_pulse_mode(stim_profile)
 
 
 def print_status(profile_name, stim_profile, stim_port, duration, mock_mode, active):
@@ -226,31 +223,18 @@ def event_fields(
     command=None,
     status=None,
 ):
-    """Build the shared columns written for each stimulation event row.
-
-    The logger accepts extra fields, but keeping the common stimulation metadata
-    in one helper makes each event row comparable across on/off/pulse/session
-    events.
-    """
-    channel_metadata = stim_profile.get("_channel_metadata", {})
-    fields = {
-        "source": "manual",
-        "profile": profile_name,
-        "pulse_mode": pulse_mode,
-        "channels": stim_profile.get("channel", [1]),
-        "channel_labels": channel_metadata.get("channel_labels"),
-        "physical_contacts": channel_metadata.get("physical_contacts"),
-        "freq_hz": stim_profile.get("freq"),
-        "pw_ms": stim_profile.get("pw"),
-        "amp_mA": stim_profile.get("amp"),
-        "duration_s": duration,
-        "inter_phase_s": stim_profile.get("inter_phase"),
-        "stim_port": stim_port,
-        "mock_mode": mock_mode,
-        "command": command,
-        "status": status,
-    }
-    return {key: value for key, value in fields.items() if value is not None}
+    """Manual-mode adapter around the shared :func:`build_event_fields`."""
+    return build_event_fields(
+        "manual",
+        profile_name,
+        stim_profile,
+        stim_port,
+        pulse_mode,
+        mock_mode,
+        duration=duration,
+        command=command,
+        status=status,
+    )
 
 
 def main():
@@ -313,42 +297,24 @@ def main():
     calibration_dir = hw_conf.get("calibration_dir")
     log_conf = CONFIG.get("logging", {})
     event_conf = CONFIG.get("pycontrol_events", {})
-    channel_metadata = resolve_channel_map(
-        stim_profile.get("channel"), CONFIG.get("channel_map", {})
-    )
-    stim_profile["_channel_metadata"] = channel_metadata
-    for warning in channel_metadata["warnings"]:
-        print(f"!! Channel map warning: {warning}")
+    channel_metadata = resolve_channel_metadata(stim_profile)
 
     # Local logging is on by default because it is the stim/ephys computer's
     # durable record of what parameters were requested and when.
     log_enabled = bool(log_conf.get("stim_events_enabled", True)) and not args.no_local_log
-    session_dir, resolved_session_id = resolve_session_dir(
-        args.animal,
-        args.session_id,
-        args.data_root or log_conf.get("data_root", "data"),
-        root_dir,
-    )
-    log_dir = resolve_output_dir(
-        args.log_dir or log_conf.get("stim_event_dir", "logs/stim_events"),
-        root_dir,
-    )
-    event_logger = StimEventLogger(
-        log_dir,
-        session_id=resolved_session_id,
-        session_dir=session_dir,
-        metadata={
-            "script": "manual_stimulation.py",
-            "animal": args.animal,
-            "session_dir": session_dir,
-            "profile_name": args.profile,
-            "stim_profile": stim_profile,
-            "channel_map": channel_metadata["channel_map"],
-            "channel_map_warnings": channel_metadata["warnings"],
-            "stim_port": stim_port,
-            "mock_mode": mock_mode,
-            "pycontrol_events": event_conf,
-        },
+    event_logger = make_event_logger(
+        script="manual_stimulation.py",
+        animal=args.animal,
+        session_id=args.session_id,
+        data_root=args.data_root,
+        log_dir=args.log_dir,
+        root_dir=root_dir,
+        profile_name=args.profile,
+        stim_profile=stim_profile,
+        channel_metadata=channel_metadata,
+        stim_port=stim_port,
+        mock_mode=mock_mode,
+        extra={"pycontrol_events": event_conf},
         enabled=log_enabled,
     )
 

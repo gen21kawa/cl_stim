@@ -42,8 +42,24 @@ def default_session_id(prefix="stim"):
     return f"{prefix}_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
-def default_animal_session_id(animal):
-    return f"{animal}_{dt.datetime.now().strftime('%Y_%m_%d_%H_%M')}"
+def round_dt_to_nearest_10min(now=None):
+    """Round a datetime to the nearest 10-minute mark (00, 10, 20, ...).
+
+    Uses timedelta arithmetic so hour/day rollover is handled (e.g. 13:57 ->
+    14:00, 14:16 -> 14:20). Seconds and microseconds are dropped.
+    """
+    if now is None:
+        now = dt.datetime.now()
+    floor = now.replace(minute=(now.minute // 10) * 10, second=0, microsecond=0)
+    remainder = now - floor
+    if remainder >= dt.timedelta(minutes=5):
+        floor += dt.timedelta(minutes=10)
+    return floor
+
+
+def default_animal_session_id(animal, now=None):
+    rounded = round_dt_to_nearest_10min(now)
+    return f"{animal}_{rounded.strftime('%Y_%m_%d_%H_%M')}"
 
 
 def resolve_output_dir(path, root_dir):

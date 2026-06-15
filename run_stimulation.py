@@ -20,11 +20,11 @@ sys.path.append(root_dir)
 # -------------------------------------------------------------------------
 from utils.loader import CONFIG
 from utils.serial_port_resolver import resolve_serial_port
-from utils.stim_event_log import (
-    StimEventLogger,
-    resolve_channel_map,
-    resolve_output_dir,
-    resolve_session_dir,
+from utils.stim_session import (
+    build_event_fields,
+    make_event_logger,
+    normalize_pulse_mode,
+    resolve_channel_metadata,
 )
 from matlab_stimulator import MatlabStimulator
 
@@ -85,6 +85,14 @@ def parse_args():
         "--no-local-log",
         action="store_true",
         help="Disable the local stimulation CSV/JSON event log.",
+    )
+    parser.add_argument(
+        "--notify-pycontrol",
+        action="store_true",
+        help=(
+            "Echo stim_on/stim_off markers back to pyControl over the trigger "
+            "link so the task can track real stim timing. Off by default."
+        ),
     )
     return parser.parse_args()
 
@@ -155,15 +163,6 @@ def command_pw_values(command, base_pw_values, channel_count):
     return [base_pw * fraction for base_pw, fraction in zip(base_pw_values, pw_fraction)]
 
 
-def pulse_mode_from_profile(stim_profile):
-    pulse_mode = str(stim_profile.get("pulse_mode", "train")).lower()
-    if pulse_mode == "single":
-        pulse_mode = "single_pulse"
-    if pulse_mode not in ("train", "single_pulse"):
-        raise ValueError("pulse_mode must be 'train' or 'single_pulse'.")
-    return pulse_mode
-
-
 def validate_commands(commands, base_pw_values, channel_count, default_duration, pulse_mode):
     if pulse_mode == "train" and default_duration <= 0:
         raise ValueError("Train-mode stimulation profiles require duration > 0.")
@@ -192,6 +191,20 @@ def open_trigger_link(port, baud_rate):
     return serial.Serial(port, baud_rate, timeout=0.01)
 
 
+def send_pycontrol_marker(link, code):
+    """Write a 2-byte little-endian marker back over the (bidirectional) link.
+
+    pyControl's UARTlink shares one UART for triggers in and markers out, so the
+    server echoes markers on the already-open trigger ``link`` rather than
+    opening a second port. Same wire format as utils.pycontrol_event_link.
+    """
+    if link is None or code is None:
+        return
+    if not 0 <= int(code) <= 65535:
+        raise ValueError(f"pyControl marker code {code} out of 16-bit range.")
+    link.write(int(code).to_bytes(2, "little", signed=False))
+
+
 def event_fields(
     experiment_name,
     profile_name,
@@ -204,29 +217,34 @@ def event_fields(
     duration=None,
     command=None,
     command_code=None,
+    pycontrol_code=None,
     status=None,
 ):
-    channel_metadata = stim_profile.get("_channel_metadata", {})
-    fields = {
-        "source": "pycontrol_trigger_server",
-        "experiment": experiment_name,
-        "profile": profile_name,
-        "pulse_mode": pulse_mode,
-        "channels": stim_profile.get("channel", [1]),
-        "channel_labels": channel_metadata.get("channel_labels"),
-        "physical_contacts": channel_metadata.get("physical_contacts"),
-        "freq_hz": stim_profile.get("freq"),
-        "pw_ms": pw_values if pw_values is not None else stim_profile.get("pw"),
-        "amp_mA": amp_values if amp_values is not None else stim_profile.get("amp"),
-        "duration_s": duration,
-        "inter_phase_s": stim_profile.get("inter_phase"),
-        "stim_port": stim_port,
-        "mock_mode": mock_mode,
-        "command": command,
-        "command_code": command_code,
-        "status": status,
-    }
-    return {key: value for key, value in fields.items() if value is not None}
+    """Trigger-server adapter around the shared :func:`build_event_fields`."""
+    return build_event_fields(
+        "pycontrol_trigger_server",
+        profile_name,
+        stim_profile,
+        stim_port,
+        pulse_mode,
+        mock_mode,
+        experiment=experiment_name,
+        command=command,
+        command_code=command_code,
+        pycontrol_code=pycontrol_code,
+        amp_values=amp_values,
+        pw_values=pw_values,
+        duration=duration,
+        status=status,
+    )
+
+
+def pycontrol_marker_codes():
+    """Marker codes the server echoes back to pyControl, with config overrides."""
+    defaults = {"stim_on": 101, "stim_off": 102, "stim_pulse": 103}
+    event_conf = CONFIG.get("pycontrol_events", {})
+    return {**defaults, **event_conf.get("codes", {})}
+
 
 def main():
     args = parse_args()
@@ -272,10 +290,12 @@ def main():
         return 2
 
     log_triggers = bool(run_conf.get("log_triggers", True))
+    notify_pycontrol = bool(args.notify_pycontrol)
+    marker_codes = pycontrol_marker_codes()
     channels = stim_profile.get("channel")
     channel_count = len(MatlabStimulator._normalize_channels(channels))
     try:
-        pulse_mode = pulse_mode_from_profile(stim_profile)
+        pulse_mode = normalize_pulse_mode(stim_profile, validate=True)
         default_duration = float(stim_profile.get("duration", 0))
         base_pw_values = expand_to_channels(stim_profile["pw"], channel_count, "pw")
         amp_values = expand_to_channels(stim_profile["amp"], channel_count, "amp")
@@ -305,6 +325,8 @@ def main():
             f"{stim_profile.get('single_pulse_train_ms', 'auto')}ms"
         )
     print(f">> Mode: {'MOCK' if mock_mode else 'REAL'}")
+    if notify_pycontrol:
+        print(f">> pyControl marker echo: ON (codes={marker_codes})")
     print(f">> Stimulator port: {stim_port}")
     if len(stim_port_candidates) > 1:
         print(f">> Stimulator port candidates: {stim_port_candidates}")
@@ -322,41 +344,25 @@ def main():
         return 1
 
     log_conf = CONFIG.get("logging", {})
-    channel_metadata = resolve_channel_map(
-        stim_profile.get("channel"), CONFIG.get("channel_map", {})
-    )
-    stim_profile["_channel_metadata"] = channel_metadata
-    for warning in channel_metadata["warnings"]:
-        print(f"!! Channel map warning: {warning}")
+    channel_metadata = resolve_channel_metadata(stim_profile)
 
     log_enabled = bool(log_conf.get("stim_events_enabled", True)) and not args.no_local_log
-    session_dir, resolved_session_id = resolve_session_dir(
-        args.animal,
-        args.session_id,
-        args.data_root or log_conf.get("data_root", "data"),
-        root_dir,
-    )
-    log_dir = resolve_output_dir(
-        args.log_dir or log_conf.get("stim_event_dir", "logs/stim_events"),
-        root_dir,
-    )
-    event_logger = StimEventLogger(
-        log_dir,
-        session_id=resolved_session_id,
-        session_dir=session_dir,
-        metadata={
-            "script": "run_stimulation.py",
-            "animal": args.animal,
-            "session_dir": session_dir,
+    event_logger = make_event_logger(
+        script="run_stimulation.py",
+        animal=args.animal,
+        session_id=args.session_id,
+        data_root=args.data_root,
+        log_dir=args.log_dir,
+        root_dir=root_dir,
+        profile_name=profile_name,
+        stim_profile=stim_profile,
+        channel_metadata=channel_metadata,
+        stim_port=stim_port,
+        mock_mode=mock_mode,
+        extra={
             "experiment_name": experiment_name,
-            "profile_name": profile_name,
-            "stim_profile": stim_profile,
-            "channel_map": channel_metadata["channel_map"],
-            "channel_map_warnings": channel_metadata["warnings"],
             "commands": commands,
-            "stim_port": stim_port,
             "trigger_port": TRIGGER_PORT,
-            "mock_mode": mock_mode,
         },
         enabled=log_enabled,
     )
@@ -616,6 +622,12 @@ def main():
                     ),
                 )
                 stim.stimulate(pw=pw_values, amp=amp_values)
+                on_marker = None
+                if notify_pycontrol:
+                    on_marker = marker_codes.get(
+                        "stim_pulse" if pulse_mode == "single_pulse" else "stim_on"
+                    )
+                    send_pycontrol_marker(link, on_marker)
                 event_logger.record(
                     "stim_pulse" if pulse_mode == "single_pulse" else "stim_on",
                     **event_fields(
@@ -634,6 +646,7 @@ def main():
                         ),
                         command=command_name,
                         command_code=command_code,
+                        pycontrol_code=on_marker,
                         status="sent",
                     ),
                 )
@@ -642,6 +655,10 @@ def main():
                         time.sleep(duration)
                     finally:
                         stim.stop()
+                        off_marker = None
+                        if notify_pycontrol:
+                            off_marker = marker_codes.get("stim_off")
+                            send_pycontrol_marker(link, off_marker)
                         event_logger.record(
                             "stim_off",
                             **event_fields(
@@ -656,6 +673,7 @@ def main():
                                 duration=duration,
                                 command=command_name,
                                 command_code=command_code,
+                                pycontrol_code=off_marker,
                                 status="sent",
                             ),
                         )
