@@ -27,6 +27,20 @@ come from `[channel_map]` in `config.toml`; update the placeholder entries after
 checking the stimulator/electrode documentation. Missing channel-map entries log
 as `unknown` and print a warning rather than stopping the session.
 
+Manual stimulation can adjust amplitude between stimulation events without
+restarting the script. The profile `amp` is treated as the session maximum; use a
+higher-amplitude profile if you need a higher ceiling. At the `stim>` prompt:
+
+```text
+amp 0.03              # set current amplitude in mA
+pulse 0.2 0.03        # 0.2 s pulse at 0.03 mA
+pulse amp 0.03        # default-duration pulse at 0.03 mA
+on 0.03               # start train stimulation at 0.03 mA
+```
+
+For multi-channel profiles, pass one amplitude per configured channel, for
+example `amp 0.03 0.04`.
+
 pyControl notification is optional and disabled by default in both scripts.
 Enable it when the pyControl task has started `hw.bci_link`:
 
