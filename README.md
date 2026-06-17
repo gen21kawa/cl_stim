@@ -1,15 +1,154 @@
-## Stimulation Timing and Behavior Logging
+## How To Use
 
-Manual and pyControl-triggered stimulation runs write a local stim-computer log
-under `logs/stim_events/<session_id>/` by default. For real sessions, pass an
-animal ID so logs land beside behavior/ephys data:
+This repo has three normal ways to run stimulation:
+
+- `manual_stimulation.py`: the operator types commands at a `stim>` prompt.
+- `passive_stimulation.py`: pyControl owns the trial timing and sends condition
+  codes over UART. This is a role-named wrapper around `run_stimulation.py`.
+- `timed_random_stimulation.py`: the stim computer owns timing and chooses
+  fixed-interval train-stimulation conditions from a balanced shuffled list.
+
+Use mock mode first on any new setup:
 
 ```bash
-python manual_stimulation.py --animal M111 --profile m1_mapping_low --real --notify-pycontrol
+python manual_stimulation.py --mock --profile m1_mapping_low
+python passive_stimulation.py --mock --experiment m1_mapping_low
+python timed_random_stimulation.py --mock --protocol m1_random_timed --max-events 6
+```
+
+Use real hardware only after the channel map, stimulator ports, and profile
+limits in `config.toml` have been checked:
+
+```bash
+python manual_stimulation.py --animal M111 --profile m1_mapping_low --real
+python passive_stimulation.py --animal M111 --experiment m1_mapping_low --real
+python timed_random_stimulation.py --animal M111 --protocol m1_random_timed --real
+```
+
+For task/passive runs, `--real` also requires the selected experiment to have
+`real_enabled = true` in `config.toml`. For timed-random runs, the selected
+timed-random protocol must have `real_enabled = true`.
+
+## Manual Stimulation
+
+Manual mode is useful for bench tests, threshold checks, and operator-triggered
+stimulation during a session:
+
+```bash
+python manual_stimulation.py --animal M111 --profile m1_mapping_low --real
+```
+
+At the `stim>` prompt:
+
+```text
+amp                   # show current amplitude
+amp 0.03              # set current amplitude in mA
+pulse                 # pulse using the default duration and current amplitude
+pulse 0.2             # 0.2 s pulse at the current amplitude
+pulse 0.2 0.03        # 0.2 s pulse at 0.03 mA
+pulse amp 0.03        # default-duration pulse at 0.03 mA
+on 0.03               # start train stimulation at 0.03 mA
+off                   # stop train stimulation
+status                # show mode, profile, pulse duration, and current amp
+quit                  # stop and exit
+```
+
+The profile `amp` is the session maximum. Manual commands may use any finite,
+nonnegative amplitude at or below that maximum. For multi-channel profiles, pass
+one amplitude per configured channel, for example:
+
+```text
+amp 0.03 0.04
+pulse 0.2 0.03 0.04
+```
+
+Manual amplitude changes are allowed between stimulation events. If train
+stimulation is already on, turn it off before changing amplitude or sending a
+new pulse.
+
+## Timed Random Stimulation
+
+Timed-random mode is useful when the stimulation computer should deliver trains
+at a fixed cadence without pyControl triggers:
+
+```bash
+python timed_random_stimulation.py --mock --protocol m1_random_timed --max-events 6
+```
+
+Protocols are configured under `[timed_random_protocols.<name>]` in
+`config.toml`. Each protocol points at a train-mode stimulation profile for
+frequency, pulse width, channels, inter-phase, and amplitude safety limits. The
+protocol adds an onset-to-onset `interval_s` and a list of conditions with
+`name`, `amp`, and `duration`.
+
+The runner uses balanced shuffle randomization: all configured conditions are
+used once in random order, then the deck is reshuffled. Pass `--seed` to repeat a
+specific order; otherwise a seed is generated and saved in
+`session_metadata.json`.
+
+Sham can be marked with `sham = true` or by setting all amplitudes to zero. Sham
+events are logged as `stim_sham` and no stimulation command is sent. Non-sham
+events log `stim_on_request`, `stim_on`, and `stim_off`.
+
+For a real session, first set the protocol's `real_enabled = true` after
+checking the channel map, ports, and amplitude limits:
+
+```bash
+python timed_random_stimulation.py --animal M111 --protocol m1_random_timed --real
+```
+
+## Task Passive Conditions
+
+Passive/task mode waits for pyControl to send a 2-byte little-endian integer
+condition code over the trigger UART. Start the stim computer server before
+starting the pyControl task:
+
+```bash
+python passive_stimulation.py --animal M111 --experiment m1_mapping_low --real
+```
+
+`passive_stimulation.py` and `run_stimulation.py` use the same implementation,
+so this is equivalent:
+
+```bash
 python run_stimulation.py --animal M111 --experiment m1_mapping_low --real
 ```
 
-With `--animal M111`, the scripts create or reuse:
+Conditions are configured under `[experiments.<name>.commands]` in
+`config.toml`. The current `m1_mapping_low` example is:
+
+```text
+1: sham       pw_fraction=[0, 0]
+2: left_m1    pw_fraction=[1, 0]
+3: right_m1   pw_fraction=[0, 1]
+4: bilateral  pw_fraction=[1, 1]
+```
+
+`pw_fraction` scales each configured channel's profile pulse width. A condition
+with all zeros is sham: it is logged as `stim_sham` and no stimulation command is
+sent. In train mode, each condition uses the profile `duration` unless that
+command has its own `duration` field. In single-pulse mode, each condition sends
+one run-once pulse.
+
+Task/passive mode uses the profile amplitude from `config.toml` for all
+conditions. To use a different amplitude ceiling, change or add a stimulation
+profile and point the experiment at it before starting the server.
+
+Command code `0` is reserved as a session marker. Use positive integer condition
+codes for stimulation/sham conditions.
+
+On the pyControl side, choose the passive condition in the task and send the
+matching integer. For example, with `m1_mapping_low`, send `1` for sham, `2` for
+left M1, `3` for right M1, or `4` for bilateral. The stimulation server logs the
+received code, the resolved condition name, the pulse width values, amplitude,
+and on/off timing.
+
+## Logging
+
+Manual and pyControl-triggered stimulation runs write a local stim-computer log
+under `logs/stim_events/<session_id>/` by default. For real sessions, pass an
+animal ID so logs land beside behavior/ephys data. With `--animal M111`, the
+scripts create or reuse:
 
 ```text
 <data_root>/M111/M111_YYYY_MM_DD_HH_MM/
@@ -27,32 +166,21 @@ come from `[channel_map]` in `config.toml`; update the placeholder entries after
 checking the stimulator/electrode documentation. Missing channel-map entries log
 as `unknown` and print a warning rather than stopping the session.
 
-Manual stimulation can adjust amplitude between stimulation events without
-restarting the script. The profile `amp` is treated as the session maximum; use a
-higher-amplitude profile if you need a higher ceiling. At the `stim>` prompt:
-
-```text
-amp 0.03              # set current amplitude in mA
-pulse 0.2 0.03        # 0.2 s pulse at 0.03 mA
-pulse amp 0.03        # default-duration pulse at 0.03 mA
-on 0.03               # start train stimulation at 0.03 mA
-```
-
-For multi-channel profiles, pass one amplitude per configured channel, for
-example `amp 0.03 0.04`.
+## pyControl Markers
 
 pyControl notification is optional and disabled by default in both scripts.
 Enable it when the pyControl task has started `hw.bci_link`:
 
 ```bash
 python manual_stimulation.py --animal M111 --profile m1_mapping_low --real --notify-pycontrol
-python run_stimulation.py    --animal M111 --experiment m1_mapping_low --real --notify-pycontrol
+python passive_stimulation.py --animal M111 --experiment m1_mapping_low --real --notify-pycontrol
 ```
 
-With `--notify-pycontrol`, `run_stimulation.py` echoes `stim_on`/`stim_off`
-markers back over the trigger link so the pyControl task can track real stim
-timing (not just the moment it sent the trigger). The host sends the same 2-byte
-little-endian integer markers expected by `../TreadmillTasks/devices/UARTlink.py`.
+With `--notify-pycontrol`, the stimulation process echoes `stim_on`/`stim_off`
+or `stim_pulse` markers back over the UART link so the pyControl task can track
+real stim timing, not just the moment it sent the trigger. The host sends the
+same 2-byte little-endian integer markers expected by
+`../TreadmillTasks/devices/UARTlink.py`.
 
 The companion pyControl task that triggers + tracks stimulation is
 `../TreadmillTasks/tasks/6-run-to-stim-electrical-spontaneous.py` (based on the

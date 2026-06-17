@@ -3,6 +3,7 @@
 [run]
 mock_mode = true
 active_experiment = "m1_mapping_low"
+active_timed_random_protocol = "m1_random_timed"
 log_triggers = true
 
 [logging]
@@ -121,6 +122,53 @@ duration = 0.2        # seconds, used when pulse_mode = "train"
 pulse_mode = "train"
 channel = [3]
 inter_phase = 50e-6
+
+[timed_random_protocols.m1_random_timed]
+profile = "m1_mapping_low"
+interval_s = 10.0
+real_enabled = false
+description = "Fixed-interval random sham/low/high M1 train stimulation."
+
+# Timed-random conditions use the channels selected by the profile above.
+# A scalar amp applies the same amplitude to every selected channel.
+
+[[timed_random_protocols.m1_random_timed.conditions]]
+name = "sham"
+sham = true
+amp = 0
+duration = 0.2
+
+[[timed_random_protocols.m1_random_timed.conditions]]
+name = "low_amp"
+amp = 0.025
+duration = 0.2
+
+[[timed_random_protocols.m1_random_timed.conditions]]
+name = "high_amp"
+amp = 0.05
+duration = 0.2
+
+[timed_random_protocols.m2_random_timed]
+profile = "m2_timing"
+interval_s = 10.0
+real_enabled = false
+description = "Fixed-interval random sham/low/high M2 train stimulation."
+
+[[timed_random_protocols.m2_random_timed.conditions]]
+name = "sham"
+sham = true
+amp = 0
+duration = 0.2
+
+[[timed_random_protocols.m2_random_timed.conditions]]
+name = "low_amp"
+amp = 0.025
+duration = 0.2
+
+[[timed_random_protocols.m2_random_timed.conditions]]
+name = "high_amp"
+amp = 0.05
+duration = 0.2
 
 [experiments.m1_mapping_low]
 profile = "m1_mapping_low"
