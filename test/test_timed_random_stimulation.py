@@ -13,6 +13,19 @@ def base_config(protocol):
     return {
         "run": {"mock_mode": True, "active_timed_random_protocol": "protocol"},
         "hardware": {"stimulator_port": "MOCK"},
+        "pycontrol_events": {
+            "enabled": False,
+            "port": "MOCK_PYCONTROL",
+            "baud_rate": 9600,
+            "codes": {
+                "session_start": 110,
+                "session_end": 111,
+                "stim_on": 101,
+                "stim_off": 102,
+                "stim_pulse": 103,
+                "stim_sham": 104,
+            },
+        },
         "stimulation": {
             "train_profile": {
                 "freq": 50,
@@ -178,6 +191,60 @@ class TimedRandomSmokeTests(unittest.TestCase):
             self.assertIn("stim_sham", event_names)
             self.assertIn("stim_on", event_names)
             self.assertIn("stim_off", event_names)
+
+    def test_notify_pycontrol_sends_marker_codes(self):
+        sent_codes = []
+
+        class FakePyControlEventLink:
+            def __init__(self, port, baud_rate=9600, timeout=0.01):
+                self.port = port
+                self.baud_rate = baud_rate
+                self.timeout = timeout
+
+            def open(self):
+                return self
+
+            def send_code(self, code):
+                sent_codes.append(code)
+
+            def close(self):
+                sent_codes.append("closed")
+
+        protocol = valid_protocol(
+            interval_s=0.005,
+            conditions=[
+                {"name": "sham", "sham": True, "amp": [0, 0], "duration": 0.001},
+                {"name": "stim", "amp": 0.025, "duration": 0.001},
+            ],
+        )
+        config = base_config(protocol)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            argv = [
+                "timed_random_stimulation.py",
+                "--protocol",
+                "protocol",
+                "--mock",
+                "--notify-pycontrol",
+                "--pycontrol-port",
+                "MOCK_PYCONTROL",
+                "--max-events",
+                "2",
+                "--session-id",
+                "notify_session",
+                "--log-dir",
+                temp_dir,
+                "--seed",
+                "7",
+            ]
+            with mock.patch.object(timed_random, "CONFIG", config), mock.patch.object(
+                timed_random, "HW_CONF", config["hardware"]
+            ), mock.patch.object(
+                timed_random, "PyControlEventLink", FakePyControlEventLink
+            ), mock.patch.object(sys, "argv", argv):
+                self.assertEqual(timed_random.main(), 0)
+
+        self.assertEqual(sent_codes, [110, 104, 101, 102, 111, "closed"])
 
 
 if __name__ == "__main__":

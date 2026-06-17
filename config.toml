@@ -38,7 +38,7 @@ hemisphere = "unknown"
 notes = "Replace channel number/label after checking M2 electrode and stimulator documentation."
 
 [pycontrol_events]
-# Manual stimulation can send these markers to a pyControl UARTlink.
+# Manual and timed-random stimulation can send these markers to a pyControl UARTlink.
 # Keep disabled until the pyControl task starts hw.bci_link and handles cursor_update.
 enabled = false
 port = "COM3"
@@ -50,6 +50,7 @@ session_end = 111
 stim_on = 101
 stim_off = 102
 stim_pulse = 103
+stim_sham = 104
 
 [hardware]
 # Wireless Dongle Port. Real-mode scripts try these in order and use the

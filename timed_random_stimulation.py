@@ -20,6 +20,7 @@ sys.path.append(root_dir)
 
 from matlab_stimulator import MatlabStimulator
 from utils.loader import CONFIG
+from utils.pycontrol_event_link import PyControlEventLink
 from utils.serial_port_resolver import resolve_serial_port
 from utils.stim_session import (
     build_event_fields,
@@ -32,6 +33,14 @@ from utils.stim_session import (
 HW_CONF = CONFIG["hardware"]
 CALIBRATION_DIR = CONFIG["hardware"].get("calibration_dir")
 RANDOMIZATION_MODE = "balanced_shuffle"
+DEFAULT_PYCONTROL_CODES = {
+    "session_start": 110,
+    "session_end": 111,
+    "stim_on": 101,
+    "stim_off": 102,
+    "stim_pulse": 103,
+    "stim_sham": 104,
+}
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,25 @@ def parse_args():
         "--real",
         action="store_true",
         help="Use real stimulator hardware. Requires protocol real_enabled = true.",
+    )
+    pycontrol = parser.add_mutually_exclusive_group()
+    pycontrol.add_argument(
+        "--notify-pycontrol",
+        action="store_true",
+        dest="notify_pycontrol",
+        help="Send event marker codes to pyControl over UART.",
+    )
+    pycontrol.add_argument(
+        "--no-notify-pycontrol",
+        action="store_false",
+        dest="notify_pycontrol",
+        help="Do not send event marker codes to pyControl.",
+    )
+    parser.set_defaults(notify_pycontrol=None)
+    parser.add_argument(
+        "--pycontrol-port",
+        default=None,
+        help="Serial port for pyControl event markers. Defaults to config.toml.",
     )
     parser.add_argument(
         "--max-events",
@@ -187,6 +215,34 @@ def resolve_protocol(protocol_name=None):
             f"Available protocols: {available}"
         )
     return selected, protocols[selected]
+
+
+def pycontrol_codes():
+    event_conf = CONFIG.get("pycontrol_events", {})
+    configured = event_conf.get("codes", {})
+    return {**DEFAULT_PYCONTROL_CODES, **configured}
+
+
+def resolve_pycontrol_port(args, hw_conf, event_conf):
+    if args.pycontrol_port:
+        return args.pycontrol_port, [args.pycontrol_port], None
+
+    if "ports" in event_conf or "port" in event_conf:
+        return resolve_serial_port(
+            event_conf,
+            "ports",
+            "port",
+            label="pyControl event port",
+            require_available=True,
+        )
+
+    return resolve_serial_port(
+        hw_conf,
+        "trigger_ports",
+        "trigger_port",
+        label="pyControl event port",
+        require_available=True,
+    )
 
 
 def validate_timed_random_protocol(protocol_name, protocol, *, interval_override=None):
@@ -399,6 +455,11 @@ def main():
 
     channel_metadata = resolve_channel_metadata(stim_profile)
     log_conf = CONFIG.get("logging", {})
+    event_conf = CONFIG.get("pycontrol_events", {})
+    notify_pycontrol = bool(event_conf.get("enabled", False))
+    if args.notify_pycontrol is not None:
+        notify_pycontrol = args.notify_pycontrol
+    codes = pycontrol_codes()
     log_enabled = bool(log_conf.get("stim_events_enabled", True)) and not args.no_local_log
     event_logger = make_event_logger(
         script="timed_random_stimulation.py",
@@ -421,9 +482,34 @@ def main():
             "conditions": [condition.raw for condition in conditions],
             "max_events": args.max_events,
             "runtime_s": args.runtime,
+            "pycontrol_events": event_conf,
+            "notify_pycontrol": notify_pycontrol,
         },
         enabled=log_enabled,
     )
+
+    pycontrol_link = None
+
+    def send_marker(marker):
+        if not marker:
+            return None
+        code = codes.get(marker)
+        if code is None:
+            return None
+        if pycontrol_link is None:
+            return code if notify_pycontrol else None
+        try:
+            pycontrol_link.send_code(code)
+        except Exception as exc:
+            event_logger.record(
+                "pycontrol_marker_send_failed",
+                pycontrol_code=code,
+                command=marker,
+                status="pycontrol_send_failed",
+                error=str(exc),
+            )
+            raise
+        return code
 
     print("=== Timed Random Stimulation ===")
     print(f">> Protocol: {protocol_name}")
@@ -438,6 +524,8 @@ def main():
     )
     print(f">> Mode: {'MOCK' if mock_mode else 'REAL'}")
     print(f">> Stimulator port: {stim_port}")
+    if notify_pycontrol:
+        print(f">> pyControl marker echo: ON (codes={codes})")
     if len(stim_port_candidates) > 1:
         print(f">> Stimulator port candidates: {stim_port_candidates}")
         if detected_ports is not None:
@@ -452,6 +540,26 @@ def main():
     if event_logger.enabled:
         print(f">> Stimulation event log: {event_logger.csv_path}")
 
+    if notify_pycontrol:
+        try:
+            pycontrol_port, pycontrol_candidates, pycontrol_detected = (
+                resolve_pycontrol_port(args, HW_CONF, event_conf)
+            )
+            pycontrol_link = PyControlEventLink(
+                pycontrol_port,
+                baud_rate=event_conf.get("baud_rate", HW_CONF.get("baud_rate", 9600)),
+            ).open()
+        except Exception as exc:
+            event_logger.close()
+            print(f"!! Could not open pyControl event link: {exc}")
+            return 2
+
+        print(f">> pyControl event link: {pycontrol_port}")
+        if len(pycontrol_candidates) > 1:
+            print(f">> pyControl port candidates: {pycontrol_candidates}")
+            if pycontrol_detected is not None:
+                print(f">> Detected serial ports: {pycontrol_detected}")
+
     stim = MatlabStimulator(
         matlab_path, mock_mode=mock_mode, calibration_dir=CALIBRATION_DIR
     )
@@ -462,6 +570,7 @@ def main():
     zero_values = [0.0] * len(validated["channels"])
 
     try:
+        session_start_code = send_marker("session_start")
         event_logger.record(
             "session_start",
             **event_fields(
@@ -474,6 +583,7 @@ def main():
                 duration=None,
                 amp_values=validated["max_amp_values"],
                 pw_values=pw_values,
+                pycontrol_code=session_start_code,
                 interval_s=interval_s,
                 seed=seed,
                 randomization_mode=RANDOMIZATION_MODE,
@@ -518,6 +628,7 @@ def main():
             }
 
             if condition.sham:
+                sham_code = send_marker("stim_sham")
                 print(
                     f">> Event {event_count}: {condition.name} sham "
                     f"(cycle {shuffle_cycle})"
@@ -536,6 +647,7 @@ def main():
                         status="no_stimulation",
                         amp_values=condition.amp_values,
                         pw_values=pw_values,
+                        pycontrol_code=sham_code,
                         **common_details,
                     ),
                 )
@@ -565,6 +677,7 @@ def main():
                 ),
             )
             stim.stimulate(pw=pw_values, amp=condition.amp_values)
+            on_code = send_marker("stim_on")
             event_logger.record(
                 "stim_on",
                 **event_fields(
@@ -579,6 +692,7 @@ def main():
                     status="sent",
                     amp_values=condition.amp_values,
                     pw_values=pw_values,
+                    pycontrol_code=on_code,
                     **common_details,
                 ),
             )
@@ -586,6 +700,7 @@ def main():
                 time.sleep(condition.duration_s)
             finally:
                 stim.stop()
+                off_code = send_marker("stim_off")
                 event_logger.record(
                     "stim_off",
                     **event_fields(
@@ -600,6 +715,7 @@ def main():
                         status="sent",
                         amp_values=zero_values,
                         pw_values=pw_values,
+                        pycontrol_code=off_code,
                         **common_details,
                     ),
                 )
@@ -629,6 +745,7 @@ def main():
             stim.stop()
         finally:
             stim.close()
+            session_end_code = send_marker("session_end")
             event_logger.record(
                 "session_end",
                 **event_fields(
@@ -641,9 +758,12 @@ def main():
                     duration=None,
                     amp_values=validated["max_amp_values"],
                     pw_values=pw_values,
+                    pycontrol_code=session_end_code,
                     events_completed=event_count,
                 ),
             )
+            if pycontrol_link is not None:
+                pycontrol_link.close()
             event_logger.close()
         print("Bye.")
 

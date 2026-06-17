@@ -97,6 +97,14 @@ checking the channel map, ports, and amplitude limits:
 python timed_random_stimulation.py --animal M111 --protocol m1_random_timed --real
 ```
 
+To let pyControl log the timed-random events, start the pyControl task's
+`hw.bci_link` and add `--notify-pycontrol`. The stimulation computer still owns
+the timing; pyControl only receives marker codes:
+
+```bash
+python timed_random_stimulation.py --animal M111 --protocol m2_random_timed --real --notify-pycontrol
+```
+
 ## Task Passive Conditions
 
 Passive/task mode waits for pyControl to send a 2-byte little-endian integer
@@ -145,7 +153,7 @@ and on/off timing.
 
 ## Logging
 
-Manual and pyControl-triggered stimulation runs write a local stim-computer log
+Manual, passive, and timed-random stimulation runs write a local stim-computer log
 under `logs/stim_events/<session_id>/` by default. For real sessions, pass an
 animal ID so logs land beside behavior/ephys data. With `--animal M111`, the
 scripts create or reuse:
@@ -168,18 +176,20 @@ as `unknown` and print a warning rather than stopping the session.
 
 ## pyControl Markers
 
-pyControl notification is optional and disabled by default in both scripts.
+pyControl notification is optional and disabled by default in all host-driven scripts.
 Enable it when the pyControl task has started `hw.bci_link`:
 
 ```bash
 python manual_stimulation.py --animal M111 --profile m1_mapping_low --real --notify-pycontrol
 python passive_stimulation.py --animal M111 --experiment m1_mapping_low --real --notify-pycontrol
+python timed_random_stimulation.py --animal M111 --protocol m2_random_timed --real --notify-pycontrol
 ```
 
 With `--notify-pycontrol`, the stimulation process echoes `stim_on`/`stim_off`
 or `stim_pulse` markers back over the UART link so the pyControl task can track
-real stim timing, not just the moment it sent the trigger. The host sends the
-same 2-byte little-endian integer markers expected by
+real stim timing, not just the moment it sent the trigger. Timed-random mode
+also sends `stim_sham` for sham conditions. The host sends the same 2-byte
+little-endian integer markers expected by
 `../TreadmillTasks/devices/UARTlink.py`.
 
 The companion pyControl task that triggers + tracks stimulation is
@@ -192,6 +202,7 @@ Default marker codes are configured in `config.toml`:
 - `101`: `stim_on`
 - `102`: `stim_off`
 - `103`: `stim_pulse`
+- `104`: `stim_sham`
 - `110`: `session_start`
 - `111`: `session_end`
 
@@ -218,6 +229,8 @@ def all_states(event):
             print("{}, external_stim_off code=102".format(get_current_time()))
         elif code == 103:
             print("{}, external_stim_pulse code=103".format(get_current_time()))
+        elif code == 104:
+            print("{}, external_stim_sham code=104".format(get_current_time()))
         elif code == 110:
             print("{}, external_stim_session_start code=110".format(get_current_time()))
         elif code == 111:
