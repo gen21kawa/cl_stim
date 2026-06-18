@@ -26,6 +26,9 @@ end
 ch_list                         = 1:16;
 stim_PW                         = 1000*stim_PW;     % Pulse width converted
 stim_amp                        = 1000*stim_amp;
+if length(stim_amp) == 1 && length(stim_PW) > 1
+    stim_amp                    = repmat(stim_amp,1,length(stim_PW));
+end
 
 % switch bmi_fes_stim_params.mode
 %     
@@ -55,8 +58,9 @@ stim_amp                        = 1000*stim_amp;
                 % the command
                 [elecs_this_muscle, indx_ch] = sort(elecs_this_muscle);
                 
-                % now rearrange the stim_PW accordingly
+                % now rearrange the stim_PW/stim_amp accordingly
                 stim_PW         = stim_PW(indx_ch);
+                stim_amp        = stim_amp(indx_ch);
 
                 % add the channels we are not stimulating to the command,
                 % and populate their PW with zeroes
@@ -68,11 +72,12 @@ stim_amp                        = 1000*stim_amp;
                 amp_cmd_an(elecs_this_muscle)  = 32768-stim_amp;
                 amp_cmd_cat(elecs_this_muscle)  = 32768+stim_amp;
                 
-                % create the stimulation command. 
-                cmd{1}          = struct('CathDur', PW_cmd, ...
+                % create the stimulation command. Set amplitude before PW
+                % so the requested amplitude is armed before stimulation.
+                cmd{1}          = struct('CathAmp', amp_cmd_cat, ...
+                                    'AnodAmp', amp_cmd_an );
+                cmd{2}          = struct('CathDur', PW_cmd, ...
                                     'AnodDur', PW_cmd); 
-%                 cmd{2}          = struct('CathAmp', amp_cmd_cat, ...
-%                                     'AnodAmp', amp_cmd_an );
                 
             case 'bipolar'
                 
@@ -89,18 +94,25 @@ stim_amp                        = 1000*stim_amp;
                 % the command
                 [elecs_this_muscle, indx_ch] = sort(elecs_this_muscle);
                 
-                % now rearrange the stim_PW accordingly
+                % now rearrange the stim_PW/stim_amp accordingly
                 stim_PW         = repmat(stim_PW,1,2);
+                stim_amp        = repmat(stim_amp,1,2);
                 stim_PW         = stim_PW(indx_ch);
+                stim_amp        = stim_amp(indx_ch);
 
                 % add the channels we are not stimulating to the command,
                 % and populate their PW with zeroes
                 % --the wireless stimulator expect a 16-channel command
                 PW_cmd          = zeros(1,length(ch_list));
                 PW_cmd(elecs_this_muscle)   = stim_PW;
+                amp_cmd         = zeros(1,length(ch_list));
+                amp_cmd(elecs_this_muscle)   = stim_amp;
                 
-                % create the stimulation command. 
-                cmd{1}          = struct('CathDur', PW_cmd, ...
+                % create the stimulation command. Set amplitude before PW
+                % so the requested amplitude is armed before stimulation.
+                cmd{1}          = struct('CathAmp', 32768+amp_cmd, ...
+                                    'AnodAmp', 32768-amp_cmd);
+                cmd{2}          = struct('CathDur', PW_cmd, ...
                                     'AnodDur', PW_cmd);
         end
        
@@ -113,4 +125,3 @@ stim_amp                        = 1000*stim_amp;
 %         
 %         error('amplitude-modulated FES not implemented yet');
 end
-

@@ -1,3 +1,4 @@
+import math
 import os
 
 
@@ -24,6 +25,8 @@ class MatlabStimulator:
         self.inter_phase = 50e-6
         self.pulse_mode = "train"
         self.single_pulse_train_ms = 1.0
+        self.pw_limit_values = None
+        self.amp_limit_values = None
         
         # Verify path exists
         if not os.path.exists(matlab_backend_path):
@@ -102,6 +105,34 @@ class MatlabStimulator:
             nargout=0,
         )
 
+    def _validate_stim_values(self, pw_values, amp_values):
+        for value in pw_values:
+            if not math.isfinite(value):
+                raise ValueError("Pulse width values must be finite numbers.")
+            if value < 0:
+                raise ValueError("Pulse width must be greater than or equal to 0 ms.")
+        for value in amp_values:
+            if not math.isfinite(value):
+                raise ValueError("Amplitude values must be finite numbers.")
+            if value < 0:
+                raise ValueError("Amplitude must be greater than or equal to 0 mA.")
+
+        if self.pw_limit_values is not None:
+            for channel, value, limit in zip(self.channels, pw_values, self.pw_limit_values):
+                if value > limit + 1e-12:
+                    raise ValueError(
+                        f"Pulse width {value:g} ms for channel {channel} exceeds "
+                        f"the configured maximum of {limit:g} ms."
+                    )
+
+        if self.amp_limit_values is not None:
+            for channel, value, limit in zip(self.channels, amp_values, self.amp_limit_values):
+                if value > limit + 1e-12:
+                    raise ValueError(
+                        f"Amplitude {value:g} mA for channel {channel} exceeds "
+                        f"the configured maximum of {limit:g} mA."
+                    )
+
     def configure(
         self,
         port,
@@ -123,6 +154,11 @@ class MatlabStimulator:
         self.pulse_mode = self._normalize_pulse_mode(pulse_mode)
         pw_values = self._normalize_stim_values(pw, "pw")
         amp_values = self._normalize_stim_values(amp, "amp")
+        self.pw_limit_values = None
+        self.amp_limit_values = None
+        self._validate_stim_values(pw_values, amp_values)
+        self.pw_limit_values = list(pw_values)
+        self.amp_limit_values = list(amp_values)
         if single_pulse_train_ms is None:
             single_pulse_train_ms = self._default_single_pulse_train_ms(
                 pw_values, self.inter_phase
@@ -246,9 +282,11 @@ class MatlabStimulator:
             pw (float): Pulse width in milliseconds (e.g., 0.2)
             amp (float): Amplitude in mA (e.g., 0.05)
         """
+        pw_values = self._normalize_stim_values(pw, "pw")
+        amp_values = self._normalize_stim_values(amp, "amp")
+        self._validate_stim_values(pw_values, amp_values)
+
         if self.mock:
-            pw_values = self._normalize_stim_values(pw, "pw")
-            amp_values = self._normalize_stim_values(amp, "amp")
             label = "MOCK SINGLE PULSE" if self.pulse_mode == "single_pulse" else "MOCK FIRE"
             print(
                 f"[MatlabStimulator] {label}: channels={list(self.channels)}, "
@@ -261,8 +299,6 @@ class MatlabStimulator:
             return
 
         try:
-            pw_values = self._normalize_stim_values(pw, "pw")
-            amp_values = self._normalize_stim_values(amp, "amp")
             self._send_stim_values(pw_values, amp_values)
 
             if self.pulse_mode == "single_pulse" and any(value > 0 for value in pw_values):

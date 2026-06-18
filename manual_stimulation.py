@@ -19,6 +19,7 @@ software log as the parameter/audit record.
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -140,9 +141,11 @@ def parse_args():
 def print_help():
     """Print the interactive commands accepted at the stim> prompt."""
     print("Commands:")
-    print("  on | 1             Start stimulation")
+    print("  on | 1 [mA ...]    Start stimulation at current or given amplitude")
     print("  off | 0            Stop stimulation")
-    print("  pulse | 2 [seconds] Stimulate briefly, then stop")
+    print("  pulse | 2 [seconds] [mA ...] Stimulate briefly, then stop")
+    print("  pulse amp <mA ...> Use default duration at a given amplitude")
+    print("  amp [mA ...]       Show/set current amplitude; profile amp is the max")
     print("  status             Show current settings")
     print("  help               Show this command list")
     print("  quit | exit        Stop stimulation and exit")
@@ -153,7 +156,108 @@ def profile_pulse_mode(stim_profile):
     return normalize_pulse_mode(stim_profile)
 
 
-def print_status(profile_name, stim_profile, stim_port, duration, mock_mode, active):
+def normalize_stim_values(values, channel_count, name):
+    """Return one numeric value per configured stimulation channel."""
+    if isinstance(values, (int, float)):
+        return [float(values)] * channel_count
+
+    normalized = [float(value) for value in values]
+    if len(normalized) == 1:
+        return normalized * channel_count
+    if len(normalized) != channel_count:
+        raise ValueError(
+            f"{name} must be a scalar or have one value per configured channel."
+        )
+    return normalized
+
+
+def format_stim_values(values):
+    """Format scalar-like or per-channel values for operator messages."""
+    if len(values) == 1:
+        return f"{values[0]:g}"
+    return "[" + ", ".join(f"{value:g}" for value in values) + "]"
+
+
+def validate_amp_values(amp_values, max_amp_values, channels):
+    """Keep manual amplitudes within the configured profile safety ceiling."""
+    for channel, value, max_value in zip(channels, amp_values, max_amp_values):
+        if not math.isfinite(value) or not math.isfinite(max_value):
+            raise ValueError("Amplitude values must be finite numbers.")
+        if value < 0:
+            raise ValueError("Amplitude must be greater than or equal to 0 mA.")
+        if value > max_value + 1e-12:
+            raise ValueError(
+                f"Amplitude {value:g} mA for channel {channel} exceeds the "
+                f"profile maximum of {max_value:g} mA."
+            )
+
+
+def parse_amp_values(tokens, channel_count, max_amp_values, channels):
+    """Parse and validate scalar or per-channel amplitude values in mA."""
+    if tokens and tokens[0] == "amp":
+        tokens = tokens[1:]
+    if not tokens:
+        raise ValueError("Usage: amp <mA> [mA ...]")
+
+    try:
+        amp_values = normalize_stim_values(tokens, channel_count, "amp")
+    except ValueError as exc:
+        raise ValueError(f"Invalid amplitude: {exc}") from exc
+
+    validate_amp_values(amp_values, max_amp_values, channels)
+    return amp_values
+
+
+def parse_on_amp_values(parts, current_amp_values, channel_count, max_amp_values, channels):
+    """Return the current or command-specific amplitude for an on command."""
+    if len(parts) == 1:
+        return list(current_amp_values)
+    return parse_amp_values(parts[1:], channel_count, max_amp_values, channels)
+
+
+def parse_pulse_command(
+    parts,
+    default_duration,
+    current_amp_values,
+    channel_count,
+    max_amp_values,
+    channels,
+):
+    """Return duration and amplitude for pulse command variants."""
+    if len(parts) == 1:
+        return default_duration, list(current_amp_values)
+
+    tokens = parts[1:]
+    if tokens[0] == "amp":
+        amp_values = parse_amp_values(
+            tokens[1:], channel_count, max_amp_values, channels
+        )
+        return default_duration, amp_values
+
+    try:
+        duration = float(tokens[0])
+    except ValueError as exc:
+        raise ValueError("Usage: pulse [seconds] [mA ...]") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError("Pulse duration must be greater than 0 seconds.")
+
+    if len(tokens) == 1:
+        return duration, list(current_amp_values)
+
+    amp_values = parse_amp_values(tokens[1:], channel_count, max_amp_values, channels)
+    return duration, amp_values
+
+
+def print_status(
+    profile_name,
+    stim_profile,
+    stim_port,
+    duration,
+    mock_mode,
+    active,
+    current_amp_values,
+    max_amp_values,
+):
     """Show the current manual-session settings in operator-readable form."""
     mode = "MOCK" if mock_mode else "REAL"
     state = "ON" if active else "OFF"
@@ -162,22 +266,11 @@ def print_status(profile_name, stim_profile, stim_port, duration, mock_mode, act
     print(f">> Profile: {profile_name}")
     print(
         f">> Port: {stim_port} | Freq: {stim_profile['freq']}Hz | "
-        f"PW: {stim_profile['pw']}ms | Amp: {stim_profile['amp']}mA | "
+        f"PW: {stim_profile['pw']}ms | "
+        f"Amp: {format_stim_values(current_amp_values)}mA "
+        f"(profile max {format_stim_values(max_amp_values)}mA) | "
         f"Pulse mode: {pulse_mode} | Pulse duration: {duration}s"
     )
-
-
-def parse_pulse_duration(parts, default_duration):
-    """Return the pulse duration from 'pulse [seconds]' or the profile default."""
-    if len(parts) == 1:
-        return default_duration
-    if len(parts) != 2:
-        raise ValueError("Usage: pulse [seconds]")
-
-    duration = float(parts[1])
-    if duration <= 0:
-        raise ValueError("Pulse duration must be greater than 0 seconds.")
-    return duration
 
 
 def pycontrol_codes():
@@ -222,6 +315,8 @@ def event_fields(
     duration=None,
     command=None,
     status=None,
+    amp_values=None,
+    pw_values=None,
 ):
     """Manual-mode adapter around the shared :func:`build_event_fields`."""
     return build_event_fields(
@@ -234,6 +329,8 @@ def event_fields(
         duration=duration,
         command=command,
         status=status,
+        amp_values=amp_values,
+        pw_values=pw_values,
     )
 
 
@@ -253,6 +350,20 @@ def main():
 
     stim_profile = dict(stim_profiles[args.profile])
     pulse_mode = profile_pulse_mode(stim_profile)
+    channels = MatlabStimulator._normalize_channels(stim_profile.get("channel"))
+    channel_count = len(channels)
+    pw_values = normalize_stim_values(stim_profile["pw"], channel_count, "pw")
+    if any(not math.isfinite(value) or value < 0 for value in pw_values):
+        print("!! Invalid profile pulse width: values must be finite and >= 0 ms.")
+        return 2
+    max_amp_values = normalize_stim_values(stim_profile["amp"], channel_count, "amp")
+    try:
+        validate_amp_values(max_amp_values, max_amp_values, channels)
+    except ValueError as exc:
+        print(f"!! Invalid profile amplitude: {exc}")
+        return 2
+    current_amp_values = list(max_amp_values)
+    zero_values = [0.0] * channel_count
 
     # "train" means stimulation stays active until we send zeros/stop.
     # "single_pulse" means each command triggers a short run-once train.
@@ -262,8 +373,10 @@ def main():
     pulse_duration = (
         args.duration if args.duration is not None else stim_profile.get("duration", 0.5)
     )
-    if pulse_mode != "single_pulse" and pulse_duration <= 0:
-        print("!! Pulse duration must be greater than 0 seconds.")
+    if pulse_mode != "single_pulse" and (
+        not math.isfinite(pulse_duration) or pulse_duration <= 0
+    ):
+        print("!! Pulse duration must be a finite value greater than 0 seconds.")
         return 2
 
     matlab_path = os.path.join(root_dir, "matlab_backend")
@@ -363,6 +476,8 @@ def main():
         pulse_duration,
         mock_mode,
         active=False,
+        current_amp_values=current_amp_values,
+        max_amp_values=max_amp_values,
     )
     if mock_mode:
         print(">> Mock mode is active. Pass --real to use stimulator hardware.")
@@ -417,6 +532,8 @@ def main():
                 pulse_mode,
                 mock_mode,
                 duration=pulse_duration,
+                amp_values=current_amp_values,
+                pw_values=pw_values,
             ),
         )
 
@@ -465,10 +582,20 @@ def main():
                                 duration=pulse_duration,
                                 command=command,
                                 status="already_active",
+                                amp_values=current_amp_values,
+                                pw_values=pw_values,
                             ),
                         )
                         continue
 
+                    stim_amp_values = parse_on_amp_values(
+                        parts,
+                        current_amp_values,
+                        channel_count,
+                        max_amp_values,
+                        channels,
+                    )
+                    current_amp_values = list(stim_amp_values)
                     record_event(
                         "stim_on_request",
                         **event_fields(
@@ -480,9 +607,11 @@ def main():
                             duration=pulse_duration,
                             command=command,
                             status="requested",
+                            amp_values=stim_amp_values,
+                            pw_values=pw_values,
                         ),
                     )
-                    stim.stimulate(pw=stim_profile["pw"], amp=stim_profile["amp"])
+                    stim.stimulate(pw=pw_values, amp=stim_amp_values)
 
                     # In train mode, nonzero PW means the stimulator should stay
                     # active until stop/zero PW. In single-pulse mode, the
@@ -501,9 +630,14 @@ def main():
                                 mock_mode,
                                 duration=expected_duration,
                                 command=command,
+                                amp_values=stim_amp_values,
+                                pw_values=pw_values,
                             ),
                         )
-                        print(">> Single pulse sent")
+                        print(
+                            ">> Single pulse sent "
+                            f"at {format_stim_values(stim_amp_values)}mA"
+                        )
                     else:
                         record_event(
                             "stim_on",
@@ -516,9 +650,14 @@ def main():
                                 mock_mode,
                                 duration=pulse_duration,
                                 command=command,
+                                amp_values=stim_amp_values,
+                                pw_values=pw_values,
                             ),
                         )
-                        print(">> Stimulation ON")
+                        print(
+                            ">> Stimulation ON "
+                            f"at {format_stim_values(stim_amp_values)}mA"
+                        )
 
                 elif action in ("off", "0"):
                     # For train mode, an off command is only meaningful if an on
@@ -536,6 +675,8 @@ def main():
                                 duration=pulse_duration,
                                 command=command,
                                 status="already_inactive",
+                                amp_values=zero_values,
+                                pw_values=zero_values,
                             ),
                         )
                         continue
@@ -551,6 +692,8 @@ def main():
                             duration=pulse_duration,
                             command=command,
                             status="requested",
+                            amp_values=zero_values,
+                            pw_values=zero_values,
                         ),
                     )
                     stim.stop()
@@ -569,12 +712,41 @@ def main():
                             mock_mode,
                             duration=pulse_duration,
                             command=command,
+                            amp_values=zero_values,
+                            pw_values=zero_values,
                         ),
                     )
                     print(">> Stimulation OFF")
 
                 elif action in ("pulse", "2"):
-                    duration = parse_pulse_duration(parts, pulse_duration)
+                    if active:
+                        print(">> Turn stimulation off before sending a pulse")
+                        record_event(
+                            "stim_pulse_ignored",
+                            **event_fields(
+                                args.profile,
+                                stim_profile,
+                                stim_port,
+                                pulse_mode,
+                                mock_mode,
+                                duration=pulse_duration,
+                                command=command,
+                                status="already_active",
+                                amp_values=current_amp_values,
+                                pw_values=pw_values,
+                            ),
+                        )
+                        continue
+
+                    duration, stim_amp_values = parse_pulse_command(
+                        parts,
+                        pulse_duration,
+                        current_amp_values,
+                        channel_count,
+                        max_amp_values,
+                        channels,
+                    )
+                    current_amp_values = list(stim_amp_values)
 
                     # A pulse command is a complete on -> wait -> off cycle in
                     # train mode. In single-pulse mode, it is just one run-once
@@ -590,11 +762,16 @@ def main():
                             duration=duration,
                             command=command,
                             status="requested",
+                            amp_values=stim_amp_values,
+                            pw_values=pw_values,
                         ),
                     )
                     if pulse_mode == "single_pulse":
-                        print(">> Single pulse")
-                        stim.stimulate(pw=stim_profile["pw"], amp=stim_profile["amp"])
+                        print(
+                            ">> Single pulse "
+                            f"at {format_stim_values(stim_amp_values)}mA"
+                        )
+                        stim.stimulate(pw=pw_values, amp=stim_amp_values)
                         active = False
                         record_event(
                             "stim_pulse",
@@ -607,13 +784,18 @@ def main():
                                 mock_mode,
                                 duration=stim.single_pulse_train_ms / 1000,
                                 command=command,
+                                amp_values=stim_amp_values,
+                                pw_values=pw_values,
                             ),
                         )
                         print(">> Pulse complete")
                         continue
 
-                    print(f">> Pulse ON for {duration}s")
-                    stim.stimulate(pw=stim_profile["pw"], amp=stim_profile["amp"])
+                    print(
+                        f">> Pulse ON for {duration}s "
+                        f"at {format_stim_values(stim_amp_values)}mA"
+                    )
+                    stim.stimulate(pw=pw_values, amp=stim_amp_values)
                     active = True
 
                     # Send/log stim_on only after the stimulation command is
@@ -630,6 +812,8 @@ def main():
                             mock_mode,
                             duration=duration,
                             command=command,
+                            amp_values=stim_amp_values,
+                            pw_values=pw_values,
                         ),
                     )
                     try:
@@ -650,9 +834,65 @@ def main():
                                 mock_mode,
                                 duration=duration,
                                 command=command,
+                                amp_values=zero_values,
+                                pw_values=zero_values,
                             ),
                         )
                     print(">> Pulse complete")
+
+                elif action == "amp":
+                    if len(parts) == 1:
+                        print(
+                            ">> Current amp: "
+                            f"{format_stim_values(current_amp_values)}mA "
+                            f"(profile max {format_stim_values(max_amp_values)}mA)"
+                        )
+                        continue
+
+                    if active:
+                        print(">> Turn stimulation off before changing amplitude")
+                        record_event(
+                            "amp_change_ignored",
+                            **event_fields(
+                                args.profile,
+                                stim_profile,
+                                stim_port,
+                                pulse_mode,
+                                mock_mode,
+                                duration=pulse_duration,
+                                command=command,
+                                status="already_active",
+                                amp_values=current_amp_values,
+                                pw_values=pw_values,
+                            ),
+                        )
+                        continue
+
+                    current_amp_values = parse_amp_values(
+                        parts[1:],
+                        channel_count,
+                        max_amp_values,
+                        channels,
+                    )
+                    record_event(
+                        "amp_change",
+                        **event_fields(
+                            args.profile,
+                            stim_profile,
+                            stim_port,
+                            pulse_mode,
+                            mock_mode,
+                            duration=pulse_duration,
+                            command=command,
+                            status="updated",
+                            amp_values=current_amp_values,
+                            pw_values=pw_values,
+                        ),
+                    )
+                    print(
+                        ">> Current amp set to "
+                        f"{format_stim_values(current_amp_values)}mA"
+                    )
 
                 elif action == "status":
                     print_status(
@@ -662,6 +902,8 @@ def main():
                         pulse_duration,
                         mock_mode,
                         active,
+                        current_amp_values,
+                        max_amp_values,
                     )
 
                 elif action == "help":
@@ -703,6 +945,8 @@ def main():
                         duration=pulse_duration,
                         command="shutdown",
                         status="requested",
+                        amp_values=zero_values,
+                        pw_values=zero_values,
                     ),
                 )
             stim.stop()
@@ -718,6 +962,8 @@ def main():
                         mock_mode,
                         duration=pulse_duration,
                         command="shutdown",
+                        amp_values=zero_values,
+                        pw_values=zero_values,
                     ),
                 )
         finally:
@@ -736,6 +982,8 @@ def main():
                         pulse_mode,
                         mock_mode,
                         duration=pulse_duration,
+                        amp_values=current_amp_values,
+                        pw_values=pw_values,
                     ),
                 )
             finally:
