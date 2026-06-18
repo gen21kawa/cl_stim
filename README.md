@@ -27,15 +27,23 @@ come from `[channel_map]` in `config.toml`; update the placeholder entries after
 checking the stimulator/electrode documentation. Missing channel-map entries log
 as `unknown` and print a warning rather than stopping the session.
 
-For manual stimulation, pyControl notification is optional and disabled by
-default. Enable it when the pyControl task has started `hw.bci_link`:
+pyControl notification is optional and disabled by default in both scripts.
+Enable it when the pyControl task has started `hw.bci_link`:
 
 ```bash
 python manual_stimulation.py --animal M111 --profile m1_mapping_low --real --notify-pycontrol
+python run_stimulation.py    --animal M111 --experiment m1_mapping_low --real --notify-pycontrol
 ```
 
-The host sends the same 2-byte little-endian integer markers expected by
-`../TreadmillTasks/devices/UARTlink.py`.
+With `--notify-pycontrol`, `run_stimulation.py` echoes `stim_on`/`stim_off`
+markers back over the trigger link so the pyControl task can track real stim
+timing (not just the moment it sent the trigger). The host sends the same 2-byte
+little-endian integer markers expected by `../TreadmillTasks/devices/UARTlink.py`.
+
+The companion pyControl task that triggers + tracks stimulation is
+`../TreadmillTasks/tasks/6-run-to-stim-electrical-spontaneous.py` (based on the
+task-5 spontaneous + penalty + auto-delivery template). It sends a command code
+(`v.stim_command_code`) at the rewarded outcome and logs markers received back.
 
 Default marker codes are configured in `config.toml`:
 
