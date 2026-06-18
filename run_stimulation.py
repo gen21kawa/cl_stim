@@ -20,6 +20,12 @@ sys.path.append(root_dir)
 # -------------------------------------------------------------------------
 from utils.loader import CONFIG
 from utils.serial_port_resolver import resolve_serial_port
+from utils.stim_event_log import (
+    StimEventLogger,
+    resolve_channel_map,
+    resolve_output_dir,
+    resolve_session_dir,
+)
 from matlab_stimulator import MatlabStimulator
 
 # -------------------------------------------------------------------------
@@ -51,6 +57,34 @@ def parse_args():
         "--real",
         action="store_true",
         help="Use real stimulator hardware. Requires experiment real_enabled = true.",
+    )
+    parser.add_argument(
+        "--session-id",
+        default=None,
+        help=(
+            "Session ID used for the local stimulation event log. With --animal, "
+            "this is the behavior/ephys session folder name."
+        ),
+    )
+    parser.add_argument(
+        "--animal",
+        default=None,
+        help="Animal ID used to place logs under <data_root>/<animal>/<session_id>/.",
+    )
+    parser.add_argument(
+        "--data-root",
+        default=None,
+        help="Root folder for animal/session logs. Defaults to [logging].data_root.",
+    )
+    parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="Directory for stimulation event logs. Defaults to [logging].stim_event_dir.",
+    )
+    parser.add_argument(
+        "--no-local-log",
+        action="store_true",
+        help="Disable the local stimulation CSV/JSON event log.",
     )
     return parser.parse_args()
 
@@ -157,6 +191,43 @@ def open_trigger_link(port, baud_rate):
 
     return serial.Serial(port, baud_rate, timeout=0.01)
 
+
+def event_fields(
+    experiment_name,
+    profile_name,
+    stim_profile,
+    stim_port,
+    pulse_mode,
+    mock_mode,
+    amp_values=None,
+    pw_values=None,
+    duration=None,
+    command=None,
+    command_code=None,
+    status=None,
+):
+    channel_metadata = stim_profile.get("_channel_metadata", {})
+    fields = {
+        "source": "pycontrol_trigger_server",
+        "experiment": experiment_name,
+        "profile": profile_name,
+        "pulse_mode": pulse_mode,
+        "channels": stim_profile.get("channel", [1]),
+        "channel_labels": channel_metadata.get("channel_labels"),
+        "physical_contacts": channel_metadata.get("physical_contacts"),
+        "freq_hz": stim_profile.get("freq"),
+        "pw_ms": pw_values if pw_values is not None else stim_profile.get("pw"),
+        "amp_mA": amp_values if amp_values is not None else stim_profile.get("amp"),
+        "duration_s": duration,
+        "inter_phase_s": stim_profile.get("inter_phase"),
+        "stim_port": stim_port,
+        "mock_mode": mock_mode,
+        "command": command,
+        "command_code": command_code,
+        "status": status,
+    }
+    return {key: value for key, value in fields.items() if value is not None}
+
 def main():
     args = parse_args()
     run_conf = CONFIG.get("run", {})
@@ -167,6 +238,7 @@ def main():
 
     try:
         experiment, profile_name, stim_profile, commands = load_experiment(experiment_name)
+        stim_profile = dict(stim_profile)
     except ValueError as exc:
         print(f"!! FATAL: {exc}")
         return 2
@@ -249,6 +321,62 @@ def main():
         print(f"!! ERROR: MATLAB backend not found at {matlab_path}")
         return 1
 
+    log_conf = CONFIG.get("logging", {})
+    channel_metadata = resolve_channel_map(
+        stim_profile.get("channel"), CONFIG.get("channel_map", {})
+    )
+    stim_profile["_channel_metadata"] = channel_metadata
+    for warning in channel_metadata["warnings"]:
+        print(f"!! Channel map warning: {warning}")
+
+    log_enabled = bool(log_conf.get("stim_events_enabled", True)) and not args.no_local_log
+    session_dir, resolved_session_id = resolve_session_dir(
+        args.animal,
+        args.session_id,
+        args.data_root or log_conf.get("data_root", "data"),
+        root_dir,
+    )
+    log_dir = resolve_output_dir(
+        args.log_dir or log_conf.get("stim_event_dir", "logs/stim_events"),
+        root_dir,
+    )
+    event_logger = StimEventLogger(
+        log_dir,
+        session_id=resolved_session_id,
+        session_dir=session_dir,
+        metadata={
+            "script": "run_stimulation.py",
+            "animal": args.animal,
+            "session_dir": session_dir,
+            "experiment_name": experiment_name,
+            "profile_name": profile_name,
+            "stim_profile": stim_profile,
+            "channel_map": channel_metadata["channel_map"],
+            "channel_map_warnings": channel_metadata["warnings"],
+            "commands": commands,
+            "stim_port": stim_port,
+            "trigger_port": TRIGGER_PORT,
+            "mock_mode": mock_mode,
+        },
+        enabled=log_enabled,
+    )
+    if event_logger.enabled:
+        print(f">> Stimulation event log: {event_logger.csv_path}")
+    event_logger.record(
+        "session_start",
+        **event_fields(
+            experiment_name,
+            profile_name,
+            stim_profile,
+            stim_port,
+            pulse_mode,
+            mock_mode,
+            amp_values=amp_values,
+            pw_values=base_pw_values,
+            duration=default_duration if pulse_mode == "train" else None,
+        ),
+    )
+
     stim = MatlabStimulator(matlab_path, mock_mode=mock_mode, calibration_dir=CALIBRATION_DIR)
 
     # 2. Configure Stimulator
@@ -269,6 +397,20 @@ def main():
         stim.connect()
     except Exception as e:
         print(f"!! FATAL: Could not connect to stimulator: {e}")
+        event_logger.record(
+            "stimulator_connect_failed",
+            error=str(e),
+            **event_fields(
+                experiment_name,
+                profile_name,
+                stim_profile,
+                stim_port,
+                pulse_mode,
+                mock_mode,
+                status="failed",
+            ),
+        )
+        event_logger.close()
         stim.close()
         return 1
 
@@ -281,6 +423,21 @@ def main():
         print(">> Link Open. Waiting for triggers...")
     except Exception as e:
         print(f"!! FATAL: Could not open trigger port {TRIGGER_PORT}: {e}")
+        event_logger.record(
+            "trigger_link_open_failed",
+            error=str(e),
+            **event_fields(
+                experiment_name,
+                profile_name,
+                stim_profile,
+                stim_port,
+                pulse_mode,
+                mock_mode,
+                status="failed",
+                command=TRIGGER_PORT,
+            ),
+        )
+        event_logger.close()
         stim.close()
         return 1
 
@@ -295,16 +452,69 @@ def main():
                     command_code = struct.unpack('<h', raw_data)[0]
                 except struct.error:
                     print("!! Warning: Malformed packet received")
+                    event_logger.record(
+                        "trigger_malformed",
+                        **event_fields(
+                            experiment_name,
+                            profile_name,
+                            stim_profile,
+                            stim_port,
+                            pulse_mode,
+                            mock_mode,
+                            status="ignored",
+                        ),
+                    )
                     continue
+                event_logger.record(
+                    "trigger_received",
+                    **event_fields(
+                        experiment_name,
+                        profile_name,
+                        stim_profile,
+                        stim_port,
+                        pulse_mode,
+                        mock_mode,
+                        amp_values=amp_values,
+                        pw_values=base_pw_values,
+                        command_code=command_code,
+                        status="received",
+                    ),
+                )
                 
                 # --- TRIGGER LOGIC ---
                 if command_code == 0:
                     if log_triggers:
                         print(f">> {timestamp()} [Trigger 0] Session start/end marker.")
+                    event_logger.record(
+                        "session_marker_received",
+                        **event_fields(
+                            experiment_name,
+                            profile_name,
+                            stim_profile,
+                            stim_port,
+                            pulse_mode,
+                            mock_mode,
+                            command_code=command_code,
+                            status="received",
+                        ),
+                    )
                     continue
 
                 if command_code not in commands:
                     print(f">> [Trigger {command_code}] Unknown command ignored.")
+                    event_logger.record(
+                        "trigger_unknown",
+                        **event_fields(
+                            experiment_name,
+                            profile_name,
+                            stim_profile,
+                            stim_port,
+                            pulse_mode,
+                            mock_mode,
+                            command_code=command_code,
+                            status="ignored",
+                        ),
+                    )
                     continue
 
                 command = commands[command_code]
@@ -312,6 +522,21 @@ def main():
                     pw_values = command_pw_values(command, base_pw_values, channel_count)
                 except ValueError as exc:
                     print(f"!! [Trigger {command_code}] Invalid command config: {exc}")
+                    event_logger.record(
+                        "trigger_invalid",
+                        error=str(exc),
+                        **event_fields(
+                            experiment_name,
+                            profile_name,
+                            stim_profile,
+                            stim_port,
+                            pulse_mode,
+                            mock_mode,
+                            command=command.get("name", f"command_{command_code}"),
+                            command_code=command_code,
+                            status="ignored",
+                        ),
+                    )
                     continue
 
                 command_name = command.get("name", f"command_{command_code}")
@@ -322,6 +547,23 @@ def main():
                         print(
                             f"!! [Trigger {command_code}] Invalid duration "
                             f"{duration}; ignored."
+                        )
+                        event_logger.record(
+                            "trigger_invalid_duration",
+                            **event_fields(
+                                experiment_name,
+                                profile_name,
+                                stim_profile,
+                                stim_port,
+                                pulse_mode,
+                                mock_mode,
+                                amp_values=amp_values,
+                                pw_values=pw_values,
+                                duration=duration,
+                                command=command_name,
+                                command_code=command_code,
+                                status="ignored",
+                            ),
                         )
                         continue
 
@@ -337,14 +579,86 @@ def main():
                 if all(pw == 0 for pw in pw_values):
                     if log_triggers:
                         print("   Sham command: no stimulation sent.")
+                    event_logger.record(
+                        "stim_sham",
+                        **event_fields(
+                            experiment_name,
+                            profile_name,
+                            stim_profile,
+                            stim_port,
+                            pulse_mode,
+                            mock_mode,
+                            amp_values=amp_values,
+                            pw_values=pw_values,
+                            duration=duration,
+                            command=command_name,
+                            command_code=command_code,
+                            status="no_stimulation",
+                        ),
+                    )
                     continue
 
+                event_logger.record(
+                    "stim_on_request",
+                    **event_fields(
+                        experiment_name,
+                        profile_name,
+                        stim_profile,
+                        stim_port,
+                        pulse_mode,
+                        mock_mode,
+                        amp_values=amp_values,
+                        pw_values=pw_values,
+                        duration=duration,
+                        command=command_name,
+                        command_code=command_code,
+                        status="requested",
+                    ),
+                )
                 stim.stimulate(pw=pw_values, amp=amp_values)
+                event_logger.record(
+                    "stim_pulse" if pulse_mode == "single_pulse" else "stim_on",
+                    **event_fields(
+                        experiment_name,
+                        profile_name,
+                        stim_profile,
+                        stim_port,
+                        pulse_mode,
+                        mock_mode,
+                        amp_values=amp_values,
+                        pw_values=pw_values,
+                        duration=(
+                            stim.single_pulse_train_ms / 1000
+                            if pulse_mode == "single_pulse"
+                            else duration
+                        ),
+                        command=command_name,
+                        command_code=command_code,
+                        status="sent",
+                    ),
+                )
                 if pulse_mode == "train":
                     try:
                         time.sleep(duration)
                     finally:
                         stim.stop()
+                        event_logger.record(
+                            "stim_off",
+                            **event_fields(
+                                experiment_name,
+                                profile_name,
+                                stim_profile,
+                                stim_port,
+                                pulse_mode,
+                                mock_mode,
+                                amp_values=amp_values,
+                                pw_values=pw_values,
+                                duration=duration,
+                                command=command_name,
+                                command_code=command_code,
+                                status="sent",
+                            ),
+                        )
                 if log_triggers:
                     print("   Done.")
 
@@ -361,6 +675,21 @@ def main():
         if link is not None:
             link.close()
         stim.close()
+        event_logger.record(
+            "session_end",
+            **event_fields(
+                experiment_name,
+                profile_name,
+                stim_profile,
+                stim_port,
+                pulse_mode,
+                mock_mode,
+                amp_values=amp_values,
+                pw_values=base_pw_values,
+                duration=default_duration if pulse_mode == "train" else None,
+            ),
+        )
+        event_logger.close()
         print("Bye.")
     return exit_code
 
