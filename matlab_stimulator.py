@@ -9,7 +9,13 @@ class MatlabStimulator:
     and driving the wireless stimulator hardware.
     """
 
-    def __init__(self, matlab_backend_path, mock_mode=False, calibration_dir=None):
+    def __init__(
+        self,
+        matlab_backend_path,
+        mock_mode=False,
+        calibration_dir=None,
+        quiet=False,
+    ):
         """
         Initialize the MATLAB Engine and add the backend files to the path.
         
@@ -19,6 +25,7 @@ class MatlabStimulator:
         """
         self.mock = mock_mode
         self.calibration_dir = calibration_dir
+        self.quiet = quiet
         self.ws_initialized = False
         self.eng = None
         self.channels = (1,)
@@ -33,16 +40,20 @@ class MatlabStimulator:
             raise FileNotFoundError(f"MATLAB backend path not found: {matlab_backend_path}")
 
         if self.mock:
+            if self.quiet:
+                return
             print("[MatlabStimulator] MOCK: MATLAB Engine not started.")
             return
 
         import matlab.engine
 
-        print("[MatlabStimulator] Starting MATLAB Engine...")
+        if not self.quiet:
+            print("[MatlabStimulator] Starting MATLAB Engine...")
         self.eng = matlab.engine.start_matlab()
             
         # Add the backend folder to MATLAB's search path
-        print(f"[MatlabStimulator] Adding path: {matlab_backend_path}")
+        if not self.quiet:
+            print(f"[MatlabStimulator] Adding path: {matlab_backend_path}")
         self.eng.addpath(self.eng.genpath(matlab_backend_path))
 
     @staticmethod
@@ -180,18 +191,20 @@ class MatlabStimulator:
             + "}"
         )
 
-        print(
-            f"[MatlabStimulator] Configuring: Port={port}, Freq={freq}Hz, "
-            f"Mode={return_mode}, PulseMode={self.pulse_mode}, "
-            f"Channels={list(self.channels)}"
-        )
+        if not self.quiet:
+            print(
+                f"[MatlabStimulator] Configuring: Port={port}, Freq={freq}Hz, "
+                f"Mode={return_mode}, PulseMode={self.pulse_mode}, "
+                f"Channels={list(self.channels)}"
+            )
 
         if self.mock:
-            print(
-                f"[MatlabStimulator] MOCK CONFIG: PW={pw_values}ms, "
-                f"Amp={amp_values}mA, Inter-phase={self.inter_phase}s, "
-                f"SinglePulseTrain={self.single_pulse_train_ms}ms"
-            )
+            if not self.quiet:
+                print(
+                    f"[MatlabStimulator] MOCK CONFIG: PW={pw_values}ms, "
+                    f"Amp={amp_values}mA, Inter-phase={self.inter_phase}s, "
+                    f"SinglePulseTrain={self.single_pulse_train_ms}ms"
+                )
             return
         
         # 1. Create the struct
@@ -244,12 +257,14 @@ class MatlabStimulator:
         Calls 'setup_wireless_stim_fes' to push config.
         """
         if self.mock:
-            print("[MatlabStimulator] MOCK: Hardware connected successfully.")
+            if not self.quiet:
+                print("[MatlabStimulator] MOCK: Hardware connected successfully.")
             self.ws_initialized = True
             return
 
         try:
-            print("[MatlabStimulator] Connecting to dongle...")
+            if not self.quiet:
+                print("[MatlabStimulator] Connecting to dongle...")
             # Create object with debug level 1
             self.eng.eval("stim_params = struct('dbg_lvl', 1, 'comm_timeout_ms', -1, 'blocking', true, 'zb_ch_page', 17, 'serial_string', sp.serial_string, 'trim_calibrate_if_missing', false);", nargout=0)
             self.eng.eval("ws = wireless_stim(stim_params);", nargout=0)
@@ -268,7 +283,8 @@ class MatlabStimulator:
             self.eng.eval("setup_wireless_stim_fes(ws, sp);", nargout=0)
             
             self.ws_initialized = True
-            print("[MatlabStimulator] Hardware Armed & Ready.")
+            if not self.quiet:
+                print("[MatlabStimulator] Hardware Armed & Ready.")
             
         except Exception as e:
             print(f"[MatlabStimulator] CONNECTION ERROR: {e}")
@@ -288,10 +304,11 @@ class MatlabStimulator:
 
         if self.mock:
             label = "MOCK SINGLE PULSE" if self.pulse_mode == "single_pulse" else "MOCK FIRE"
-            print(
-                f"[MatlabStimulator] {label}: channels={list(self.channels)}, "
-                f"pw={pw_values}ms, amp={amp_values}mA"
-            )
+            if not self.quiet:
+                print(
+                    f"[MatlabStimulator] {label}: channels={list(self.channels)}, "
+                    f"pw={pw_values}ms, amp={amp_values}mA"
+                )
             return
 
         if not self.ws_initialized:
@@ -322,7 +339,8 @@ class MatlabStimulator:
         """Safely stops stimulation (0 PW)"""
         if self.mock:
             if self.pulse_mode == "single_pulse":
-                print("[MatlabStimulator] MOCK STOP: single-pulse mode idle.")
+                if not self.quiet:
+                    print("[MatlabStimulator] MOCK STOP: single-pulse mode idle.")
                 return
             self.stimulate(0, 0)
             return
@@ -344,7 +362,8 @@ class MatlabStimulator:
 
     def close(self):
         """Clean shutdown of hardware and engine"""
-        print("[MatlabStimulator] Shutting down...")
+        if not self.quiet:
+            print("[MatlabStimulator] Shutting down...")
         if not self.mock and self.ws_initialized:
             try:
                 # Stop command specific to wireless stimulator
@@ -355,4 +374,5 @@ class MatlabStimulator:
 
         if self.eng is not None:
             self.eng.quit()
-        print("[MatlabStimulator] Engine Closed.")
+        if not self.quiet:
+            print("[MatlabStimulator] Engine Closed.")
