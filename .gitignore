@@ -7,6 +7,9 @@ __pycache__/
 *.log
 logs/
 
+# Generated analysis outputs
+analysis/
+
 # MATLAB generated files
 *.asv
 *.m~
