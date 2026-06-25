@@ -75,6 +75,13 @@ at a fixed cadence without pyControl triggers:
 python timed_random_stimulation.py --mock --protocol m1_random_timed --max-events 6
 ```
 
+For mock testing without per-event console output, add `--quiet`; the full event
+record is still written to `stim_events.csv`:
+
+```bash
+python timed_random_stimulation.py --mock --protocol m1_random_timed --max-events 6 --quiet
+```
+
 Protocols are configured under `[timed_random_protocols.<name>]` in
 `config.toml`. Each protocol points at a train-mode stimulation profile for
 frequency, pulse width, channels, inter-phase, and amplitude safety limits. The

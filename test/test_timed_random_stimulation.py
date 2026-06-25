@@ -1,8 +1,10 @@
 import csv
+import io
 import random
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -245,6 +247,43 @@ class TimedRandomSmokeTests(unittest.TestCase):
                 self.assertEqual(timed_random.main(), 0)
 
         self.assertEqual(sent_codes, [110, 104, 101, 102, 111, "closed"])
+
+    def test_quiet_mock_run_suppresses_per_event_console_output(self):
+        protocol = valid_protocol(
+            interval_s=0.005,
+            conditions=[
+                {"name": "sham", "sham": True, "amp": [0, 0], "duration": 0.001},
+                {"name": "stim", "amp": 0.025, "duration": 0.001},
+            ],
+        )
+        config = base_config(protocol)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            argv = [
+                "timed_random_stimulation.py",
+                "--protocol",
+                "protocol",
+                "--mock",
+                "--quiet",
+                "--max-events",
+                "2",
+                "--session-id",
+                "quiet_session",
+                "--log-dir",
+                temp_dir,
+                "--seed",
+                "7",
+            ]
+            output = io.StringIO()
+            with mock.patch.object(timed_random, "CONFIG", config), mock.patch.object(
+                timed_random, "HW_CONF", config["hardware"]
+            ), mock.patch.object(sys, "argv", argv), redirect_stdout(output):
+                self.assertEqual(timed_random.main(), 0)
+
+        text = output.getvalue()
+        self.assertNotIn("MOCK FIRE", text)
+        self.assertNotIn(">> Event", text)
+        self.assertNotIn(">> Conditions:", text)
 
 
 if __name__ == "__main__":

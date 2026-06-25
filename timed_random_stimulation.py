@@ -121,6 +121,11 @@ def parse_args():
         help="Random seed for balanced shuffling. Generated and logged if omitted.",
     )
     parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Reduce console output; event details are still written to the CSV log.",
+    )
+    parser.add_argument(
         "--session-id",
         default=None,
         help=(
@@ -530,13 +535,14 @@ def main():
         print(f">> Stimulator port candidates: {stim_port_candidates}")
         if detected_ports is not None:
             print(f">> Detected serial ports: {detected_ports}")
-    print(">> Conditions:")
-    for index, condition in enumerate(conditions, start=1):
-        label = "sham" if condition.sham else "stim"
-        print(
-            f"   {index}: {condition.name} ({label}) "
-            f"amp={condition.amp_values}mA duration={condition.duration_s:g}s"
-        )
+    if not args.quiet:
+        print(">> Conditions:")
+        for index, condition in enumerate(conditions, start=1):
+            label = "sham" if condition.sham else "stim"
+            print(
+                f"   {index}: {condition.name} ({label}) "
+                f"amp={condition.amp_values}mA duration={condition.duration_s:g}s"
+            )
     if event_logger.enabled:
         print(f">> Stimulation event log: {event_logger.csv_path}")
 
@@ -561,7 +567,10 @@ def main():
                 print(f">> Detected serial ports: {pycontrol_detected}")
 
     stim = MatlabStimulator(
-        matlab_path, mock_mode=mock_mode, calibration_dir=CALIBRATION_DIR
+        matlab_path,
+        mock_mode=mock_mode,
+        calibration_dir=CALIBRATION_DIR,
+        quiet=args.quiet,
     )
     exit_code = 0
     event_count = 0
@@ -629,10 +638,11 @@ def main():
 
             if condition.sham:
                 sham_code = send_marker("stim_sham")
-                print(
-                    f">> Event {event_count}: {condition.name} sham "
-                    f"(cycle {shuffle_cycle})"
-                )
+                if not args.quiet:
+                    print(
+                        f">> Event {event_count}: {condition.name} sham "
+                        f"(cycle {shuffle_cycle})"
+                    )
                 event_logger.record(
                     "stim_sham",
                     **event_fields(
@@ -654,11 +664,12 @@ def main():
                 next_onset += interval_s
                 continue
 
-            print(
-                f">> Event {event_count}: {condition.name} "
-                f"amp={condition.amp_values}mA duration={condition.duration_s:g}s "
-                f"(cycle {shuffle_cycle})"
-            )
+            if not args.quiet:
+                print(
+                    f">> Event {event_count}: {condition.name} "
+                    f"amp={condition.amp_values}mA duration={condition.duration_s:g}s "
+                    f"(cycle {shuffle_cycle})"
+                )
             event_logger.record(
                 "stim_on_request",
                 **event_fields(
