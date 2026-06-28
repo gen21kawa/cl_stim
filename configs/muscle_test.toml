@@ -1,0 +1,7 @@
+[stimulation.muscle_test]
+freq = 30
+amp = 2.0
+pw = 0.4
+duration = 1.0
+channel = [2, 4]
+inter_phase = 50e-6

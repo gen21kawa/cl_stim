@@ -1,0 +1,21 @@
+[run]
+active_experiment = "brain_standard_single_pulse"
+
+[stimulation.brain_standard_single_pulse]
+freq = 130
+amp = 0.02
+pw = 0.2
+duration = 0.5
+pulse_mode = "single_pulse"
+single_pulse_train_ms = 1.0
+channel = [1]
+inter_phase = 50e-6
+
+[experiments.brain_standard_single_pulse]
+profile = "brain_standard_single_pulse"
+real_enabled = false
+description = "Standard single-channel brain stimulation, one run-once pulse."
+
+[experiments.brain_standard_single_pulse.commands.1]
+name = "stim"
+pw_fraction = [1]

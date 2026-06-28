@@ -1,0 +1,24 @@
+[run]
+active_experiment = "m2_passive_timing"
+
+[stimulation.m2_passive_timing]
+freq = 50
+amp = 0.05
+pw = 0.2
+duration = 0.2
+pulse_mode = "train"
+channel = [3]
+inter_phase = 50e-6
+
+[experiments.m2_passive_timing]
+profile = "m2_passive_timing"
+real_enabled = false
+description = "Task 6 M2 timing perturbation, sham vs M2 stimulation."
+
+[experiments.m2_passive_timing.commands.1]
+name = "sham"
+pw_fraction = [0]
+
+[experiments.m2_passive_timing.commands.2]
+name = "m2_stim"
+pw_fraction = [1]

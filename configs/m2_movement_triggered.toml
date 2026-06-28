@@ -1,0 +1,31 @@
+[run]
+active_movement_triggered_protocol = "m2_movement_triggered"
+
+[experiment]
+type = "movement_triggered"
+name = "m2_movement_triggered"
+real_enabled = false
+trigger_code = 1
+duration = 0.2
+description = "Movement-triggered random sham/low/high M2 train stimulation."
+
+[stim]
+freq = 50
+max_amp = 0.05
+pw = 0.2
+pulse_mode = "train"
+channel = [3]
+inter_phase = 50e-6
+
+[[conditions]]
+name = "sham"
+sham = true
+amp = 0
+
+[[conditions]]
+name = "low_amp"
+amp = 0.025
+
+[[conditions]]
+name = "high_amp"
+amp = 0.05

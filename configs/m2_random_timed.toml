@@ -1,0 +1,33 @@
+[run]
+active_timed_random_protocol = "m2_random_timed"
+
+[stimulation.m2_random_timed]
+freq = 50
+amp = 0.05
+pw = 0.2
+duration = 0.2
+pulse_mode = "train"
+channel = [3]
+inter_phase = 50e-6
+
+[timed_random_protocols.m2_random_timed]
+profile = "m2_random_timed"
+interval_s = 10.0
+real_enabled = false
+description = "Fixed-interval random sham/low/high M2 train stimulation."
+
+[[timed_random_protocols.m2_random_timed.conditions]]
+name = "sham"
+sham = true
+amp = 0
+duration = 0.2
+
+[[timed_random_protocols.m2_random_timed.conditions]]
+name = "low_amp"
+amp = 0.025
+duration = 0.2
+
+[[timed_random_protocols.m2_random_timed.conditions]]
+name = "high_amp"
+amp = 0.05
+duration = 0.2
