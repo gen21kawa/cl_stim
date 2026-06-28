@@ -112,6 +112,27 @@ the timing; pyControl only receives marker codes:
 python timed_random_stimulation.py --animal M111 --protocol m2_random_timed --real --notify-pycontrol
 ```
 
+## Movement-Triggered Mode
+
+Movement-triggered mode is for sessions where pyControl owns trial timing and
+the stimulation computer owns randomized amplitude selection and train duration.
+Start the server before the pyControl task:
+
+```bash
+python movement_triggered_stimulation.py --animal M111 --protocol m2_movement_triggered --real
+```
+
+The companion pyControl task is
+`../TreadmillTasks/tasks/7-motion-triggered-electrical-stim.py`. It records
+camera and MotSen1 motion, waits for a stationary intertrial, sends trigger code
+`1` after the configured movement criterion, logs returned `stim_on` or
+`stim_sham`, and starts the next intertrial only after `stim_off`.
+
+The `m2_movement_triggered` protocol is configured under
+`[movement_triggered_protocols]`. Its `duration` controls both real stimulation
+duration and sham pseudo-duration; conditions define the randomized amplitude
+list, including `amp = 0` for sham.
+
 ## Task Passive Conditions
 
 Passive/task mode waits for pyControl to send a 2-byte little-endian integer

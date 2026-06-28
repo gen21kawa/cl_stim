@@ -4,6 +4,7 @@
 mock_mode = true
 active_experiment = "m1_mapping_low"
 active_timed_random_protocol = "m1_random_timed"
+active_movement_triggered_protocol = "m2_movement_triggered"
 log_triggers = true
 
 [logging]
@@ -170,6 +171,26 @@ duration = 0.2
 name = "high_amp"
 amp = 0.05
 duration = 0.2
+
+[movement_triggered_protocols.m2_movement_triggered]
+profile = "m2_timing"
+duration = 0.2
+trigger_code = 1
+real_enabled = false
+description = "Movement-triggered random sham/low/high M2 train stimulation."
+
+[[movement_triggered_protocols.m2_movement_triggered.conditions]]
+name = "sham"
+sham = true
+amp = 0
+
+[[movement_triggered_protocols.m2_movement_triggered.conditions]]
+name = "low_amp"
+amp = 0.025
+
+[[movement_triggered_protocols.m2_movement_triggered.conditions]]
+name = "high_amp"
+amp = 0.05
 
 [experiments.m1_mapping_low]
 profile = "m1_mapping_low"
