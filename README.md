@@ -1,33 +1,55 @@
 ## How To Use
 
-This repo has three normal ways to run stimulation:
+This repo has four normal ways to run stimulation:
 
 - `manual_stimulation.py`: the operator types commands at a `stim>` prompt.
 - `passive_stimulation.py`: pyControl owns the trial timing and sends condition
   codes over UART. This is a role-named wrapper around `run_stimulation.py`.
 - `timed_random_stimulation.py`: the stim computer owns timing and chooses
   fixed-interval train-stimulation conditions from a balanced shuffled list.
+- `movement_triggered_stimulation.py`: pyControl detects movement and the stim
+  computer randomizes sham/stim amplitude.
+
+`config.toml` now holds shared settings only: ports, logging, marker codes, and
+channel labels. The active experiment is selected here:
+
+```toml
+[run]
+experiment_config = "configs/m2_movement_triggered.toml"
+```
+
+Experiment-specific stimulation parameters live in `configs/*.toml`. Change
+`experiment_config` before starting a different experiment.
+
+Common choices:
+
+- `configs/m2_movement_triggered.toml`: movement-triggered M2 sham/low/high.
+- `configs/m1_mapping_low.toml`: pyControl-triggered M1 mapping.
+- `configs/m1_random_timed.toml`: timed-random M1 sham/low/high.
+- `configs/brain_standard.toml`: basic single-channel bench test.
 
 Use mock mode first on any new setup:
 
 ```bash
-python manual_stimulation.py --mock --profile m1_mapping_low
+python movement_triggered_stimulation.py --mock --max-triggers 3
+python manual_stimulation.py --mock --profile brain_standard
 python passive_stimulation.py --mock --experiment m1_mapping_low
 python timed_random_stimulation.py --mock --protocol m1_random_timed --max-events 6
 ```
 
 Use real hardware only after the channel map, stimulator ports, and profile
-limits in `config.toml` have been checked:
+limits in the selected experiment config have been checked:
 
 ```bash
-python manual_stimulation.py --animal M111 --profile m1_mapping_low --real
+python movement_triggered_stimulation.py --animal M111 --real
+python manual_stimulation.py --animal M111 --profile brain_standard --real
 python passive_stimulation.py --animal M111 --experiment m1_mapping_low --real
 python timed_random_stimulation.py --animal M111 --protocol m1_random_timed --real
 ```
 
 For task/passive runs, `--real` also requires the selected experiment to have
-`real_enabled = true` in `config.toml`. For timed-random runs, the selected
-timed-random protocol must have `real_enabled = true`.
+`real_enabled = true`. For timed-random and movement-triggered runs, the
+selected protocol/experiment must also have `real_enabled = true`.
 
 ## Manual Stimulation
 
@@ -35,7 +57,7 @@ Manual mode is useful for bench tests, threshold checks, and operator-triggered
 stimulation during a session:
 
 ```bash
-python manual_stimulation.py --animal M111 --profile m1_mapping_low --real
+python manual_stimulation.py --animal M111 --profile brain_standard --real
 ```
 
 At the `stim>` prompt:
@@ -82,11 +104,11 @@ record is still written to `stim_events.csv`:
 python timed_random_stimulation.py --mock --protocol m1_random_timed --max-events 6 --quiet
 ```
 
-Protocols are configured under `[timed_random_protocols.<name>]` in
-`config.toml`. Each protocol points at a train-mode stimulation profile for
-frequency, pulse width, channels, inter-phase, and amplitude safety limits. The
-protocol adds an onset-to-onset `interval_s` and a list of conditions with
-`name`, `amp`, and `duration`.
+Timed-random protocols are configured in the selected file under
+`[timed_random_protocols.<name>]`. Each protocol points at a train-mode
+stimulation profile for frequency, pulse width, channels, inter-phase, and
+amplitude safety limits. The protocol adds an onset-to-onset `interval_s` and a
+list of conditions with `name`, `amp`, and `duration`.
 
 The runner uses balanced shuffle randomization: all configured conditions are
 used once in random order, then the deck is reshuffled. Pass `--seed` to repeat a
@@ -119,7 +141,7 @@ the stimulation computer owns randomized amplitude selection and train duration.
 Start the server before the pyControl task:
 
 ```bash
-python movement_triggered_stimulation.py --animal M111 --protocol m2_movement_triggered --real
+python movement_triggered_stimulation.py --animal M111 --real
 ```
 
 The companion pyControl task is
@@ -128,10 +150,38 @@ camera and MotSen1 motion, waits for a stationary intertrial, sends trigger code
 `1` after the configured movement criterion, logs returned `stim_on` or
 `stim_sham`, and starts the next intertrial only after `stim_off`.
 
-The `m2_movement_triggered` protocol is configured under
-`[movement_triggered_protocols]`. Its `duration` controls both real stimulation
-duration and sham pseudo-duration; conditions define the randomized amplitude
-list, including `amp = 0` for sham.
+The default movement-triggered parameters are in
+`configs/m2_movement_triggered.toml`:
+
+```toml
+[experiment]
+name = "m2_movement_triggered"
+real_enabled = false
+trigger_code = 1
+duration = 0.2
+
+[stim]
+freq = 50
+max_amp = 0.05
+pw = 0.2
+pulse_mode = "train"
+channel = [3]
+inter_phase = 50e-6
+
+[[conditions]]
+name = "sham"
+sham = true
+amp = 0
+
+[[conditions]]
+name = "low_amp"
+amp = 0.025
+```
+
+`duration` controls both real stimulation duration and sham pseudo-duration.
+`max_amp` is the safety ceiling; every condition amplitude must be less than or
+equal to it. Update `channel` to the real M2 stimulator channel before setting
+`real_enabled = true`.
 
 ## Task Passive Conditions
 
@@ -150,8 +200,9 @@ so this is equivalent:
 python run_stimulation.py --animal M111 --experiment m1_mapping_low --real
 ```
 
-Conditions are configured under `[experiments.<name>.commands]` in
-`config.toml`. The current `m1_mapping_low` example is:
+Conditions are configured in the selected experiment file under
+`[experiments.<name>.commands]`. The current `m1_mapping_low` example is in
+`configs/m1_mapping_low.toml`:
 
 ```text
 1: sham       pw_fraction=[0, 0]
@@ -166,7 +217,7 @@ sent. In train mode, each condition uses the profile `duration` unless that
 command has its own `duration` field. In single-pulse mode, each condition sends
 one run-once pulse.
 
-Task/passive mode uses the profile amplitude from `config.toml` for all
+Task/passive mode uses the profile amplitude from the selected config for all
 conditions. To use a different amplitude ceiling, change or add a stimulation
 profile and point the experiment at it before starting the server.
 
@@ -208,9 +259,9 @@ pyControl notification is optional and disabled by default in all host-driven sc
 Enable it when the pyControl task has started `hw.bci_link`:
 
 ```bash
-python manual_stimulation.py --animal M111 --profile m1_mapping_low --real --notify-pycontrol
+python manual_stimulation.py --animal M111 --profile brain_standard --real --notify-pycontrol
 python passive_stimulation.py --animal M111 --experiment m1_mapping_low --real --notify-pycontrol
-python timed_random_stimulation.py --animal M111 --protocol m2_random_timed --real --notify-pycontrol
+python timed_random_stimulation.py --animal M111 --protocol m1_random_timed --real --notify-pycontrol
 ```
 
 With `--notify-pycontrol`, the stimulation process echoes `stim_on`/`stim_off`

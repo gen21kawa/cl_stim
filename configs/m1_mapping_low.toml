@@ -1,0 +1,32 @@
+[run]
+active_experiment = "m1_mapping_low"
+
+[stimulation.m1_mapping_low]
+freq = 50
+amp = 0.05
+pw = 0.2
+duration = 0.2
+pulse_mode = "train"
+channel = [1, 2]
+inter_phase = 50e-6
+
+[experiments.m1_mapping_low]
+profile = "m1_mapping_low"
+real_enabled = true
+description = "Stationary/onset/delayed M1 mapping, low-amplitude block."
+
+[experiments.m1_mapping_low.commands.1]
+name = "sham"
+pw_fraction = [0, 0]
+
+[experiments.m1_mapping_low.commands.2]
+name = "left_m1"
+pw_fraction = [1, 0]
+
+[experiments.m1_mapping_low.commands.3]
+name = "right_m1"
+pw_fraction = [0, 1]
+
+[experiments.m1_mapping_low.commands.4]
+name = "bilateral"
+pw_fraction = [1, 1]

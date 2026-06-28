@@ -80,8 +80,8 @@ def parse_args():
         "--protocol",
         default=None,
         help=(
-            "Protocol name from [movement_triggered_protocols]. Defaults to "
-            "[run].active_movement_triggered_protocol."
+            "Movement-triggered protocol name. Self-contained experiment configs "
+            "use [experiment].name; legacy configs use [movement_triggered_protocols]."
         ),
     )
     mode = parser.add_mutually_exclusive_group()
@@ -220,7 +220,37 @@ def validate_trigger_code(trigger_code):
     return trigger_code
 
 
+def self_contained_protocol():
+    experiment = CONFIG.get("experiment", {})
+    stim = CONFIG.get("stim")
+    conditions = CONFIG.get("conditions")
+    if not experiment and stim is None and conditions is None:
+        return None
+
+    experiment_type = experiment.get("type")
+    if experiment_type not in (None, "movement_triggered"):
+        return None
+    if stim is None and conditions is None:
+        return None
+
+    protocol_name = experiment.get("name", "movement_triggered")
+    protocol = dict(experiment)
+    protocol["stim"] = stim
+    protocol["conditions"] = conditions or []
+    return protocol_name, protocol
+
+
 def resolve_protocol(protocol_name=None):
+    direct_protocol = self_contained_protocol()
+    if direct_protocol is not None:
+        selected, protocol = direct_protocol
+        if protocol_name and protocol_name != selected:
+            raise ValueError(
+                f"Self-contained movement-triggered config is named '{selected}', "
+                f"but --protocol requested '{protocol_name}'."
+            )
+        return selected, protocol
+
     protocols = CONFIG.get("movement_triggered_protocols", {})
     selected = protocol_name or CONFIG.get("run", {}).get(
         "active_movement_triggered_protocol"
@@ -247,8 +277,23 @@ def pycontrol_codes():
     return {**DEFAULT_PYCONTROL_CODES, **configured}
 
 
-def validate_movement_triggered_protocol(protocol_name, protocol):
-    """Validate config and return profile details plus normalized conditions."""
+def resolve_stim_profile(protocol_name, protocol):
+    if protocol.get("stim") is not None:
+        stim_profile = dict(protocol["stim"])
+        profile_name = protocol.get("profile") or protocol_name
+        if "max_amp" in stim_profile:
+            if "amp" in stim_profile and stim_profile["amp"] != stim_profile["max_amp"]:
+                raise ValueError(
+                    "Use either [stim].max_amp or [stim].amp for the amplitude "
+                    "safety ceiling, not both."
+                )
+            stim_profile["amp"] = stim_profile["max_amp"]
+        if "amp" not in stim_profile:
+            raise ValueError(
+                f"Movement-triggered experiment '{protocol_name}' requires "
+                "[stim].max_amp."
+            )
+        return profile_name, stim_profile
 
     profiles = CONFIG.get("stimulation", {})
     profile_name = protocol.get("profile")
@@ -258,8 +303,22 @@ def validate_movement_triggered_protocol(protocol_name, protocol):
             f"Movement-triggered protocol '{protocol_name}' refers to unknown "
             f"stimulation profile '{profile_name}'. Available profiles: {available}"
         )
+    return profile_name, dict(profiles[profile_name])
 
-    stim_profile = dict(profiles[profile_name])
+
+def validate_stim_profile(protocol_name, stim_profile):
+    for key in ("freq", "pw", "amp"):
+        if key not in stim_profile:
+            raise ValueError(
+                f"Movement-triggered experiment '{protocol_name}' requires [stim].{key}."
+            )
+
+
+def validate_movement_triggered_protocol(protocol_name, protocol):
+    """Validate config and return profile details plus normalized conditions."""
+
+    profile_name, stim_profile = resolve_stim_profile(protocol_name, protocol)
+    validate_stim_profile(protocol_name, stim_profile)
     pulse_mode = normalize_pulse_mode(stim_profile, validate=True)
     if pulse_mode != "train":
         raise ValueError(
@@ -666,7 +725,7 @@ def main():
 
     print("=== Movement-Triggered Stimulation Server ===")
     print(f">> Protocol: {protocol_name}")
-    print(f">> Profile: {profile_name}")
+    print(f">> Stim config: {profile_name}")
     print(f">> Trigger code: {trigger_code}")
     print(f">> Duration: {duration_s:g}s")
     print(f">> Randomization: {RANDOMIZATION_MODE}, seed={seed}")
